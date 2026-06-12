@@ -18,11 +18,16 @@ log = logging.getLogger(__name__)
 def usb_device_dir_for_tty(tty_path: str, sysfs_root: Path = Path("/sys")) -> Path:
     """Walk up from a tty's sysfs node to the USB *device* (has `authorized`)."""
     name = Path(tty_path).resolve().name  # ttyUSB3, symlinks resolved
-    node = (sysfs_root / "class" / "tty" / name / "device").resolve()
+    link = sysfs_root / "class" / "tty" / name / "device"
+    if not link.exists():
+        raise BackendError(f"no sysfs node {link} for {tty_path}")
+    node = link.resolve()
     for candidate in (node, *node.parents):
         if (candidate / "authorized").is_file() and (candidate / "idVendor").is_file():
             return candidate
-    raise BackendError(f"no USB device with 'authorized' found above {tty_path}")
+    raise BackendError(
+        f"no USB device with 'authorized' found above {tty_path} (walked up from {node})"
+    )
 
 
 def power_cycle_tty(

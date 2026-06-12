@@ -31,11 +31,13 @@ class RealBackend(NetworkBackend):
         nmcli: Nmcli,
         routing: Routing,
         at_port_provider: Callable[[], str | None] | None = None,
+        connect_timeout: int = 90,
     ) -> None:
         self.mmcli = mmcli
         self.nmcli = nmcli
         self.routing = routing
         self.at_port_provider = at_port_provider
+        self.connect_timeout = connect_timeout
 
     def modem_available(self) -> bool:
         try:
@@ -54,7 +56,7 @@ class RealBackend(NetworkBackend):
         )
 
     def connect(self) -> None:
-        self.nmcli.up(CONNECTION_NAME)
+        self.nmcli.up(CONNECTION_NAME, timeout=self.connect_timeout)
 
     def disconnect(self) -> None:
         self.nmcli.down(CONNECTION_NAME)
