@@ -22,6 +22,9 @@ class ConnectionState:
     active: bool
     interface: str | None = None
     ip_address: str | None = None
+    # NM is mid-activation (registering/getting a bearer). The daemon must
+    # WAIT, not retry: re-running `connection up` cancels registration.
+    activating: bool = False
 
 
 class NetworkBackend(ABC):
@@ -35,7 +38,11 @@ class NetworkBackend(ABC):
 
     @abstractmethod
     def connect(self) -> None:
-        """Bring the cellular connection up (nmcli connection up); may raise."""
+        """START bringing the connection up (non-blocking); may raise.
+
+        Completion is observed via get_connection_state(): `activating` while
+        in progress, then `active` with an IP. Callers must not call this
+        again while activating -- it cancels in-flight registration."""
 
     @abstractmethod
     def disconnect(self) -> None: ...

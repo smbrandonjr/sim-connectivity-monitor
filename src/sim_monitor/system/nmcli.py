@@ -63,15 +63,19 @@ class Nmcli:
              "gsm.password", password,
              "ipv4.route-metric", str(metric),
              "ipv6.route-metric", str(metric),
-             "connection.autoconnect", "yes",
-             "connection.autoconnect-retries", "0"]  # 0 = retry forever
+             # The daemon owns activation. With autoconnect, NM races our
+             # explicit `connection up` calls and each new activation request
+             # CANCELS the modem's in-flight network registration.
+             "connection.autoconnect", "no"]
         )
 
-    def up(self, name: str = CONNECTION_NAME, timeout: int = 60) -> None:
-        self._run(
-            ["nmcli", "--wait", str(timeout), "connection", "up", name],
-            timeout=timeout + 10,
-        )
+    def up(self, name: str = CONNECTION_NAME) -> None:
+        """Start activation and return immediately (--wait 0).
+
+        Progress is observed via connection_state(); blocking here (and
+        re-invoking on timeout) cancels in-flight registration, which can
+        take minutes on roaming SIMs."""
+        self._run(["nmcli", "--wait", "0", "connection", "up", name], timeout=30)
 
     def down(self, name: str = CONNECTION_NAME) -> None:
         try:
@@ -90,7 +94,10 @@ class Nmcli:
         except BackendError:
             return ConnectionState(active=False)
         fields = _parse_terse(out)
-        if fields.get("GENERAL.STATE") != "activated":
+        general_state = fields.get("GENERAL.STATE", "")
+        if general_state.startswith("activating"):
+            return ConnectionState(active=False, activating=True)
+        if general_state != "activated":
             return ConnectionState(active=False)
         device = fields.get("GENERAL.DEVICES") or None
         ip = fields.get("IP4.ADDRESS[1]")

@@ -61,6 +61,7 @@ class Daemon:
         self.active_profile: Profile | None = None
         self.forced_profile: str | None = None
         self._connect_deadline: float | None = None
+        self._activation_logged = False
         self._fallback_until: float | None = None
 
         store.update(profile_count=len(profiles))
@@ -249,16 +250,30 @@ class Daemon:
         except (ModemError, BackendError) as e:
             self._fail(f"configuration failed: {e}")
             return
-        self._connect_deadline = self.clock() + self.config.daemon.connect_timeout_seconds
+        self._connect_deadline = (
+            self.clock() + self.config.daemon.registration_timeout_seconds
+        )
+        self._activation_logged = False
         self._go(S.CONNECTING)
 
     def _state_connecting(self) -> None:
-        try:
-            self.backend.connect()
-        except BackendError as e:
-            self._fail(f"connect failed: {e}")
-            return
+        """Patiently drive NM activation.
+
+        Registration on roaming SIMs can take minutes (carrier scans, reject/
+        retry cycles). NM reports `activating` the whole time; re-running
+        `connection up` during that window CANCELS registration, so we only
+        (re)kick activation when NM is idle, and otherwise just wait until
+        the registration deadline.
+        """
         conn = self.backend.get_connection_state()
+        if not (conn.active and conn.ip_address) and not conn.activating:
+            # Idle: first attempt, or NM gave up on the previous one -> re-kick.
+            try:
+                self.backend.connect()
+            except BackendError as e:
+                self._fail(f"connect failed: {e}")
+                return
+            conn = self.backend.get_connection_state()
         if conn.active and conn.ip_address:
             self.events.info(
                 "connection", f"connected: {conn.interface} {conn.ip_address}"
@@ -274,8 +289,15 @@ class Daemon:
                 last_error=None,
             )
             return
+        if conn.activating and not self._activation_logged:
+            self._activation_logged = True
+            self.events.info(
+                "connection",
+                "activation in progress (network registration); waiting up to "
+                f"{self.config.daemon.registration_timeout_seconds}s",
+            )
         if self._connect_deadline and self.clock() > self._connect_deadline:
-            self._fail("timed out waiting for IP address")
+            self._fail("timed out waiting for network registration / IP address")
 
     def _state_connected(self) -> None:
         assert self.driver is not None and self.active_profile is not None

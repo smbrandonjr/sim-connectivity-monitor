@@ -55,11 +55,7 @@ def build(config: AppConfig, profiles: list[Profile]) -> App:
             mmcli, at_port=config.modem.at_port, baud=config.modem.baud
         )
         backend = RealBackend(
-            mmcli,
-            Nmcli(),
-            Routing(),
-            at_port_provider=lambda: detector.last_at_port,
-            connect_timeout=config.daemon.connect_timeout_seconds,
+            mmcli, Nmcli(), Routing(), at_port_provider=lambda: detector.last_at_port
         )
 
     daemon = Daemon(

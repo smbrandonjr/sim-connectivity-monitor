@@ -95,6 +95,30 @@ class TestNmcli:
         assert state.interface == "wwan0"
         assert state.ip_address == "10.170.42.7"
 
+    def test_connection_state_activating(self):
+        runner = FakeRunner(
+            {
+                "nmcli -t -f GENERAL.STATE,GENERAL.DEVICES,IP4.ADDRESS":
+                    "GENERAL.STATE:activating\nGENERAL.DEVICES:cdc-wdm0\n"
+            }
+        )
+        state = Nmcli(runner).connection_state()
+        assert state.active is False
+        assert state.activating is True
+
+    def test_up_is_non_blocking(self):
+        runner = FakeRunner()
+        Nmcli(runner).up()
+        assert runner.commands() == ["nmcli --wait 0 connection up sim-monitor-cellular"]
+
+    def test_ensure_disables_autoconnect(self):
+        runner = FakeRunner(
+            {"nmcli -t -f NAME connection show": "sim-monitor-cellular\n"}
+        )
+        Nmcli(runner).ensure_gsm_connection(apn="hologram", metric=50)
+        modify = next(c for c in runner.commands() if "connection modify" in c)
+        assert "connection.autoconnect no" in modify
+
     def test_connection_state_not_activated(self):
         runner = FakeRunner(
             {"nmcli -t -f GENERAL.STATE,GENERAL.DEVICES,IP4.ADDRESS": NMCLI_SHOW_DOWN}

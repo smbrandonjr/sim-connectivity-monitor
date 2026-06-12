@@ -24,8 +24,11 @@ class FakeBackend(NetworkBackend):
         self.fail_connect = False
         self.fail_configure = False
         self.drop_connection = False  # next state poll reports the bearer lost
+        self.activation_ticks = 0  # >0: report `activating` for N polls first
+        self.connect_is_noop = False  # connect() succeeds but nothing happens
         self.disable_enable_calls = 0
         self.usb_cycle_calls = 0
+        self._activating = 0
 
     def modem_available(self) -> bool:
         return self.driver is not None
@@ -45,13 +48,25 @@ class FakeBackend(NetworkBackend):
                 raise BackendError("modem is in airplane mode")
             if not self.driver.sim_present:
                 raise BackendError("no SIM")
+        if self.connect_is_noop:
+            return
+        if self.activation_ticks > 0:
+            self._activating = self.activation_ticks
+            return
         self.connected = True
         self.drop_connection = False
 
     def disconnect(self) -> None:
         self.connected = False
+        self._activating = 0
 
     def get_connection_state(self) -> ConnectionState:
+        if self._activating > 0:
+            self._activating -= 1
+            if self._activating == 0:
+                self.connected = True
+                self.drop_connection = False
+            return ConnectionState(active=False, activating=True)
         if self.drop_connection:
             self.connected = False
             self.drop_connection = False

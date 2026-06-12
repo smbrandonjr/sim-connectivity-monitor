@@ -237,6 +237,25 @@ class TestRecovery:
         harness.tick(5, advance=200)  # 1000s of stable CONNECTED ticks
         assert harness.daemon.supervisor.failures == 0
 
+    def test_connecting_waits_while_nm_is_activating(self, harness):
+        """Slow network registration must NOT trigger retries/escalation:
+        re-kicking activation cancels in-flight registration."""
+        harness.backend.activation_ticks = 4
+        harness.run_until(State.CONNECTING)
+        connect_calls_state = harness.backend.connected
+        harness.tick(2, advance=5)
+        assert harness.daemon.state is State.CONNECTING  # patiently waiting
+        assert harness.daemon.supervisor.failures == 0
+        assert connect_calls_state is False
+        harness.run_until(State.CONNECTED)
+
+    def test_registration_deadline_eventually_fails(self, harness):
+        harness.backend.connect_is_noop = True  # NM keeps accepting, nothing happens
+        harness.run_until(State.CONNECTING)
+        harness.tick(advance=301)  # past registration_timeout_seconds (300)
+        assert harness.daemon.state is State.DEGRADED
+        assert "registration" in harness.store.get().last_error
+
     def test_modem_failure_never_crashes_tick(self, harness):
         harness.run_until(State.CONNECTED)
         harness.driver.fail_all = True

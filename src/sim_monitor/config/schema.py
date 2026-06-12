@@ -137,6 +137,10 @@ class ModemConfig(StrictModel):
 class DaemonConfig(StrictModel):
     tick_seconds: float = Field(default=5, gt=0, le=60)
     connect_timeout_seconds: int = Field(default=90, ge=10)
+    # Total time allowed for network registration + IP before the supervisor
+    # steps in. Roaming SIMs (Hologram) may scan carriers for minutes,
+    # especially after a modem reset -- interrupting makes it WORSE.
+    registration_timeout_seconds: int = Field(default=300, ge=30)
 
 
 class AppConfig(StrictModel):

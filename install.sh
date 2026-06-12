@@ -41,6 +41,7 @@ web:
 daemon:
   tick_seconds: 5
   connect_timeout_seconds: 90
+  registration_timeout_seconds: 300   # roaming SIMs may scan carriers for minutes
 modem:
   at_port: auto          # auto = /dev/sim-monitor-at udev symlink, then VID hints
   baud: 115200

@@ -9,6 +9,9 @@ web:
 daemon:
   tick_seconds: 5
   connect_timeout_seconds: 90
+  # Roaming SIMs (Hologram) can take minutes to register, especially after a
+  # modem reset -- the daemon waits this long before recovery kicks in.
+  registration_timeout_seconds: 300
 
 log_level: INFO
 
