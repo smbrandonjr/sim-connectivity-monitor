@@ -25,8 +25,8 @@ Install it on a Pi, plug in a modem, and it will:
 In development. Phases:
 
 - [x] Phase 0 — project scaffolding, config schema / ICCID matcher
-- [ ] Phase 1 — core engine (state machine, drivers, supervisor) against a simulated modem
-- [ ] Phase 2 — web UI
+- [x] Phase 1 — core engine (state machine, drivers, supervisor) against a simulated modem
+- [x] Phase 2 — web UI
 - [ ] Phase 3 — hardware integration (Pi + real modems)
 - [ ] Phase 4 — routing, HTTP monitor, fallback test on hardware
 - [ ] Phase 5 — resilience hardening + docs
