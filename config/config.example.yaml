@@ -1,0 +1,25 @@
+# sim-monitor app configuration.
+# On the Pi this lives at /etc/sim-monitor/config.yaml.
+# Copy this file and adjust; the real config.yaml is gitignored.
+
+web:
+  host: 0.0.0.0        # LAN-only deployment assumed; do not expose publicly (no auth in v1)
+  port: 8080
+
+daemon:
+  tick_seconds: 5
+  connect_timeout_seconds: 90
+
+log_level: INFO
+
+# SQLite database for events + monitor history.
+# Pi: /var/lib/sim-monitor/sim-monitor.db   Dev: a local relative path is fine.
+db_path: sim-monitor.db
+
+# Directory of profile YAML files (one profile per file, loaded in sorted filename order).
+# Pi: /etc/sim-monitor/profiles.d
+profiles_dir: config/profiles.d
+
+# true = run against a fake modem + fake network backend (no hardware needed).
+# The --simulate CLI flag overrides this to true.
+simulate: false

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# IDE
+.idea/
+.vscode/
+
+# Local runtime data
+*.db
+*.db-journal
+
+# Real configs may contain secrets (tokens, APN credentials) — never commit them.
+# Only example files and the secret-free Hologram default profile are tracked.
+config/config.yaml
+config/profiles.d/*.yaml
+!config/profiles.d/00-hologram-default.yaml
+*.local.yaml

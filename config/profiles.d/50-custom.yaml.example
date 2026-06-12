@@ -1,0 +1,60 @@
+# Example custom profile showing every available field.
+# Copy to a .yaml file in this directory (gitignored) and edit.
+# Profiles are matched against the inserted SIM's ICCID; the best match wins:
+#   exact match > longest matching prefix > lowest priority number > name.
+
+name: my-special-sims
+description: Example — Hologram profile type needing three PDP contexts and PAP auth
+
+match:
+  # Patterns are exact ICCIDs or prefixes ending in "*".
+  iccid_patterns:
+    - "8944500612345678901"   # one specific SIM
+    - "8944502*"              # or a whole prefix range
+  priority: 10                # lower number = higher precedence on ties
+
+# The modem will be reconciled to EXACTLY these contexts (1-3):
+# firmware-auto-created extras are deleted, mismatches corrected, missing ones defined.
+pdp_contexts:
+  - cid: 1
+    apn: hologram
+    pdp_type: IPv4v6
+    auth: none
+    bearer: true              # exactly one context must be the bearer
+  - cid: 2
+    apn: hologram.special
+    pdp_type: IPv4
+    auth: pap
+    username: REPLACE_ME
+    password: REPLACE_ME      # secrets are fine HERE because real profile files are gitignored
+  - cid: 3
+    apn: ims
+    pdp_type: IPv4v6
+    auth: none
+
+# Raw AT commands sent before connecting (vendor-specific tweaks, band locks, etc.)
+at_init:
+  - 'AT+QCFG="nwscanmode",0'
+
+routing:
+  make_default: true
+  metric: 50
+
+# Periodic HTTP heartbeat sent OUT THE CELLULAR INTERFACE while connected.
+# Placeholders: {iccid} {imei} {imsi} {operator} {signal_rssi} {signal_percent}
+#               {ip_address} {hostname} {timestamp} {state} {profile_name}
+monitor:
+  enabled: true
+  interval_seconds: 300
+  request:
+    method: POST
+    url: "https://hooks.example.com/heartbeat"
+    headers:
+      Content-Type: application/json
+      Authorization: "Bearer REPLACE_ME"
+    body: '{"iccid":"{iccid}","imei":"{imei}","operator":"{operator}","rssi":{signal_rssi},"ip":"{ip_address}","host":"{hostname}","ts":"{timestamp}"}'
+    timeout_seconds: 15
+    expect_status: [200, 204]
+
+fallback_test:
+  airplane_seconds: 900

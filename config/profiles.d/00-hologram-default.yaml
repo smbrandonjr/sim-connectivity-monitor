@@ -1,0 +1,30 @@
+# Default profile for standard Hologram SIMs: basic IPv4 PDP context, APN "hologram".
+# Catch-all match (lowest precedence) so any unrecognized SIM gets a sane Hologram setup.
+# This file is committed (no secrets). Site-specific profiles go in separate files here,
+# which are gitignored.
+
+name: hologram-default
+description: Standard Hologram SIM — single IPv4 context, APN hologram
+
+match:
+  iccid_patterns: ["*"]
+  priority: 1000          # lowest precedence: any more specific profile wins
+
+pdp_contexts:
+  - cid: 1
+    apn: hologram
+    pdp_type: IPv4
+    auth: none
+    bearer: true          # this context's APN is handed to NetworkManager for the data bearer
+
+at_init: []
+
+routing:
+  make_default: true
+  metric: 50              # beats NetworkManager defaults: ethernet 100, wifi 600
+
+monitor:
+  enabled: false
+
+fallback_test:
+  airplane_seconds: 900   # 15 min in airplane mode lets the SIM applet switch profiles
