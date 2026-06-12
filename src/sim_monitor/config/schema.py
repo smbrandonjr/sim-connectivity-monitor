@@ -123,6 +123,13 @@ class WebConfig(StrictModel):
     port: int = Field(default=8080, ge=1, le=65535)
 
 
+class ModemConfig(StrictModel):
+    # "auto" = /dev/sim-monitor-at udev symlink, then known VID/interface hints.
+    # Set an explicit device (e.g. /dev/ttyUSB3) to override.
+    at_port: str = "auto"
+    baud: int = Field(default=115200, ge=1200)
+
+
 class DaemonConfig(StrictModel):
     tick_seconds: float = Field(default=5, gt=0, le=60)
     connect_timeout_seconds: int = Field(default=90, ge=10)
@@ -131,6 +138,7 @@ class DaemonConfig(StrictModel):
 class AppConfig(StrictModel):
     web: WebConfig = Field(default_factory=WebConfig)
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
+    modem: ModemConfig = Field(default_factory=ModemConfig)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     db_path: Path = Path("sim-monitor.db")
     profiles_dir: Path = Path("config/profiles.d")

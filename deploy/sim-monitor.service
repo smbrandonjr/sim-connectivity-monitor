@@ -1,0 +1,29 @@
+[Unit]
+Description=SIM connectivity monitor (cellular watchdog + web UI)
+Documentation=https://github.com/smbrandonjr/sim-connectivity-monitor
+After=network.target ModemManager.service NetworkManager.service
+Wants=ModemManager.service NetworkManager.service
+# Stop genuine crash loops (real bugs / broken config) instead of thrashing.
+# Connectivity failures never exit the daemon, so this should never trip in
+# normal operation.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=notify
+ExecStart=/opt/sim-monitor/venv/bin/python -m sim_monitor --config /etc/sim-monitor/config.yaml
+Restart=on-failure
+RestartSec=15
+# The daemon pets the watchdog every tick; all of its I/O is timeout-bounded,
+# so 120s of silence means a genuinely wedged process.
+WatchdogSec=120
+
+# Runs as root (serial port, nmcli/mmcli, SO_BINDTODEVICE, sysfs USB reset)
+# but with the filesystem locked down.
+ProtectHome=yes
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/etc/sim-monitor /var/lib/sim-monitor
+
+[Install]
+WantedBy=multi-user.target

@@ -196,7 +196,7 @@ class Daemon:
             return
         self.store.update(vendor=identity.vendor, model=identity.model, imei=identity.imei)
         if not sim.present:
-            self.store.update(sim_present=False, iccid=None, imsi=None)
+            self.store.update(sim_present=False, iccid=None, imsi=None, last_error=sim.detail)
             return  # keep polling: SIM may be inserted any moment
         self.store.update(sim_present=True, iccid=sim.iccid, imsi=sim.imsi)
         self.events.info("sim", f"SIM ready, ICCID {sim.iccid}")

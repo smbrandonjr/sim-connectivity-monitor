@@ -33,6 +33,7 @@ class SimStatus:
     present: bool
     iccid: str | None = None
     imsi: str | None = None
+    detail: str | None = None  # human-readable reason when not usable (e.g. "SIM PIN required")
 
 
 class ModemDriver(ABC):

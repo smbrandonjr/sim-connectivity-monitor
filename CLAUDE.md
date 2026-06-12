@@ -21,8 +21,14 @@ default route, and heartbeats a configurable HTTP endpoint to prove connectivity
   own the connection lifecycle; raw AT commands over a dedicated serial port
   (`modem/at_channel.py`) handle nuanced ops (PDP reconciliation, airplane-mode fallback
   test, identity reads). udev rules hide that AT port from ModemManager (`ID_MM_PORT_IGNORE`).
-- **Vendor drivers**: `modem/driver_base.py` ABC with 3GPP AT defaults; Quectel/SIMCOM/Telit
-  subclasses override quirks. Selected by USB VID, fallback `AT+CGMI`.
+- **Vendor drivers**: `modem/driver_base.py` ABC; `modem/at_driver.py` implements it with
+  3GPP AT defaults; Quectel/SIMCOM/Telit subclasses (`modem/drivers/`) override quirks
+  (ICCID command, reset command, PDP auth syntax). Selected by USB VID, fallback `AT+CGMI`
+  (`modem/detect.py`). AT port resolution: config `modem.at_port` > `/dev/sim-monitor-at`
+  udev symlink > VID/interface hints.
+- **Hardware backend**: `system/real_backend.py` over `system/{mmcli,nmcli,routing}.py`
+  subprocess wrappers (all parsing fixture-tested) + `system/usb_power.py` (sysfs
+  `authorized` toggle). All subprocess calls timeout-bounded (`system/proc.py`).
 - **PDP reconciliation**: the modem must end up with *exactly* the profile's `pdp_contexts`
   (1–3) — extras auto-created by modem firmware get deleted, mismatches fixed, missing ones
   defined. Pure diff logic in `modem/pdp_reconcile.py`.

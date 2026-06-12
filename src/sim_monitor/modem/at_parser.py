@@ -44,6 +44,15 @@ def parse_imsi(lines: list[str]) -> str:
     raise ATParseError(f"no IMSI in response: {lines!r}")
 
 
+def parse_imei(lines: list[str]) -> str:
+    """AT+CGSN answers with a bare 14-17 digit IMEI/IMEISV."""
+    for line in lines:
+        line = line.strip().strip('"')
+        if re.fullmatch(r"\d{14,17}", line):
+            return line
+    raise ATParseError(f"no IMEI in response: {lines!r}")
+
+
 @dataclass(frozen=True)
 class SignalQuality:
     rssi_dbm: int | None  # None = unknown (modem reported 99)

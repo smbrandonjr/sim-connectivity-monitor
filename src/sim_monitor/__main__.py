@@ -42,10 +42,6 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("profile problem: %s: %s", err.path, err.error)
     log.info("loaded %d profile(s): %s", len(profiles), ", ".join(p.name for p in profiles))
 
-    if not config.simulate:
-        log.error("hardware mode is not implemented yet -- run with --simulate")
-        return 1
-
     from sim_monitor import app
 
     return app.run(config, profiles)

@@ -44,7 +44,19 @@ def build(config: AppConfig, profiles: list[Profile]) -> App:
         detector = FakeDetector(driver, appear_after=2)  # modem "enumerates" after ~2 ticks
         backend = FakeBackend(driver)
     else:
-        raise NotImplementedError("hardware mode arrives in Phase 3 -- use --simulate")
+        from sim_monitor.modem.detect import RealDetector
+        from sim_monitor.system.mmcli import Mmcli
+        from sim_monitor.system.nmcli import Nmcli
+        from sim_monitor.system.real_backend import RealBackend
+        from sim_monitor.system.routing import Routing
+
+        mmcli = Mmcli()
+        detector = RealDetector(
+            mmcli, at_port=config.modem.at_port, baud=config.modem.baud
+        )
+        backend = RealBackend(
+            mmcli, Nmcli(), Routing(), at_port_provider=lambda: detector.last_at_port
+        )
 
     daemon = Daemon(
         config=config,

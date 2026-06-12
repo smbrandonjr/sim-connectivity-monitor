@@ -1,0 +1,5 @@
+# Files that must keep LF endings to run on the Pi
+*.sh text eol=lf
+*.service text eol=lf
+*.rules text eol=lf
+*.yaml text eol=lf
