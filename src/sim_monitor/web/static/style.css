@@ -52,5 +52,10 @@ input[type=number] { padding: 6px; border: 1px solid var(--border); border-radiu
 select { padding: 6px; border: 1px solid var(--border); border-radius: 6px; }
 code { background: #eef2f5; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
 pre.at-output { margin: 0; font: 13px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 16px 0 6px; }
+.ref-table td:first-child { white-space: nowrap; vertical-align: top; }
+.ref-cmd { cursor: pointer; }
+.ref-cmd code { color: var(--accent); }
+.ref-cmd:hover code { text-decoration: underline; }
 details { margin-top: 10px; }
 summary { cursor: pointer; }

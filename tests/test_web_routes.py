@@ -166,6 +166,12 @@ class TestDiagnostics:
         assert page.status_code == 200
         assert b"Run standard diagnostics" in page.data
 
+    def test_command_reference_present(self, sim, client):
+        page = client.get("/diagnostics/")
+        assert b"Command reference" in page.data
+        assert b"AT+CRSM=176,28539,0,0,12" in page.data  # FPLMN read
+        assert b"AT+COPS=0" in page.data  # back to auto network selection
+
     def test_run_standard_bundle(self, sim, client):
         response = client.post("/diagnostics/run", data={"commands": ""})
         assert response.status_code == 302
