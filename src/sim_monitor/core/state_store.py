@@ -13,6 +13,41 @@ from typing import Any
 
 from sim_monitor.core.states import State
 
+# Concise per-state explanations for {status_message}.
+_STATE_MESSAGES = {
+    State.NO_MODEM: "no modem detected",
+    State.MODEM_FOUND: "modem found, waiting for SIM",
+    State.SIM_READY: "selecting profile",
+    State.CONFIGURING: "configuring modem",
+    State.CONNECTING: "connecting",
+    State.DEGRADED: "recovery in progress",
+}
+
+
+def _short(text: str, limit: int = 120) -> str:
+    """First line only, capped — heartbeat payloads should stay readable."""
+    line = text.strip().splitlines()[0] if text.strip() else ""
+    return line[: limit - 3] + "..." if len(line) > limit else line
+
+
+def derive_status(snapshot: Snapshot) -> tuple[str, str]:
+    """({status}, {status_message}) for heartbeat payloads.
+
+    connected     -> cellular is up
+    fallback_test -> radio intentionally off (don't page yourself over it)
+    degraded      -> the Pi is alive but cellular is down; message says why
+    """
+    if snapshot.state is State.CONNECTED:
+        if snapshot.operator:
+            return "connected", f"cellular connected via {snapshot.operator}"
+        return "connected", "cellular connected"
+    if snapshot.state is State.FALLBACK_TEST:
+        return "fallback_test", "fallback test in progress (radio off)"
+    base = _STATE_MESSAGES.get(snapshot.state, "cellular down")
+    if snapshot.last_error:
+        return "degraded", f"{base}: {_short(snapshot.last_error)}"
+    return "degraded", base
+
 
 @dataclass(frozen=True)
 class FallbackStatus:
@@ -48,7 +83,10 @@ class Snapshot:
         """Values available to monitor request templates."""
         import socket
 
+        status, status_message = derive_status(self)
         return {
+            "status": status,
+            "status_message": status_message,
             "iccid": self.iccid,
             "imei": self.imei,
             "imsi": self.imsi,

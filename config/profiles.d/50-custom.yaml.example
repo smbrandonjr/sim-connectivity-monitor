@@ -40,19 +40,26 @@ routing:
   make_default: true
   metric: 50
 
-# Periodic HTTP heartbeat sent OUT THE CELLULAR INTERFACE while connected.
+# Periodic HTTP heartbeat. While cellular is CONNECTED it is sent out the
+# cellular interface (proves cellular egress); while cellular is down it keeps
+# firing over any other route (ethernet/wifi) with {status}=degraded so your
+# endpoint hears "I'm alive but cellular is down" instead of silence.
 # Placeholders: {iccid} {imei} {imsi} {operator} {signal_rssi} {signal_percent}
 #               {ip_address} {hostname} {timestamp} {state} {profile_name}
+#               {status} {status_message}
+#   {status}: connected | degraded | fallback_test
+#   {status_message}: one-line reason, e.g. "recovery in progress: connect failed: ..."
 monitor:
   enabled: true
   interval_seconds: 300
+  send_when_degraded: true   # false = pause probes until cellular reconnects
   request:
     method: POST
     url: "https://hooks.example.com/heartbeat"
     headers:
       Content-Type: application/json
       Authorization: "Bearer REPLACE_ME"
-    body: '{"iccid":"{iccid}","imei":"{imei}","operator":"{operator}","rssi":{signal_rssi},"ip":"{ip_address}","host":"{hostname}","ts":"{timestamp}"}'
+    body: '{"iccid":"{iccid}","imei":"{imei}","operator":"{operator}","rssi":{signal_rssi},"ip":"{ip_address}","host":"{hostname}","ts":"{timestamp}","status":"{status}","status_message":"{status_message}"}'
     timeout_seconds: 15
     expect_status: [200, 204]
 

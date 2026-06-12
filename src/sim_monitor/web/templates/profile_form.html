@@ -13,6 +13,9 @@
   Profiles are validated on save: 1–3 PDP contexts with unique CIDs, exactly one
   <code>bearer: true</code>, ICCID patterns as digits with optional trailing <code>*</code>.
   Placeholders for monitor requests: <code>{iccid} {imei} {imsi} {operator} {signal_rssi}
-  {signal_percent} {ip_address} {hostname} {timestamp} {state} {profile_name}</code>.
+  {signal_percent} {ip_address} {hostname} {timestamp} {state} {profile_name}
+  {status} {status_message}</code>. While cellular is down, probes keep firing over any
+  other interface with <code>{status}</code> = <code>degraded</code>
+  (disable via <code>monitor.send_when_degraded: false</code>).
 </p>
 {% endblock %}

@@ -64,16 +64,26 @@ class HttpMonitor:
             if not (forced or scheduled):
                 continue
             snapshot = self.store.get()
-            if snapshot.state is not State.CONNECTED and not forced:
+            connected = snapshot.state is State.CONNECTED
+            if not connected and not forced and not profile.monitor.send_when_degraded:
                 continue  # don't reschedule; fire as soon as we're connected again
             self._next_due = now + profile.monitor.interval_seconds
             self.probe(profile)
 
     def probe(self, profile: Profile) -> bool:
-        """Send one monitor request and record the result. Returns success."""
+        """Send one monitor request and record the result. Returns success.
+
+        While CONNECTED the socket is bound to the cellular interface (a
+        success proves cellular egress). Otherwise the request goes out
+        unbound — over ethernet/wifi if available — carrying
+        {status}=degraded so the endpoint learns *why* instead of silence.
+        """
         request = profile.monitor.request
         assert request is not None
         snapshot = self.store.get()
+        bind_interface = (
+            snapshot.interface if snapshot.state is State.CONNECTED else None
+        )
         url, headers, body, unknown = render_request(
             request.url, request.headers, request.body, snapshot.placeholder_context()
         )
@@ -83,7 +93,7 @@ class HttpMonitor:
             )
         started = time.monotonic()
         try:
-            response = make_session(snapshot.interface).request(
+            response = make_session(bind_interface).request(
                 request.method,
                 url,
                 headers=headers,

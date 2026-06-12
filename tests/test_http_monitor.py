@@ -61,7 +61,13 @@ def env(monkeypatch):
     )
     db = Database(":memory:")
     session = StubSession()
-    monkeypatch.setattr(http_monitor, "make_session", lambda interface=None: session)
+    session.bound_interfaces = []
+
+    def fake_make_session(interface=None):
+        session.bound_interfaces.append(interface)
+        return session
+
+    monkeypatch.setattr(http_monitor, "make_session", fake_make_session)
     monitor = HttpMonitor(
         store=store,
         db=db,
@@ -100,3 +106,50 @@ def test_probe_network_error_recorded(env):
     result = db.recent_monitor_results(1)[0]
     assert result["ok"] == 0
     assert "no route" in result["error"]
+
+
+def test_probe_binds_cellular_while_connected(env):
+    monitor, session, _ = env
+    monitor.probe(PROFILE)
+    assert session.bound_interfaces == ["wwan0"]
+
+
+STATUS_PROFILE = Profile.model_validate(
+    {
+        "name": "status-monitored",
+        "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}],
+        "monitor": {
+            "enabled": True,
+            "interval_seconds": 60,
+            "request": {
+                "method": "POST",
+                "url": "https://hooks.example.com/hb",
+                "body": '{"status":"{status}","msg":"{status_message}","iccid":"{iccid}"}',
+            },
+        },
+    }
+)
+
+
+def test_degraded_probe_goes_unbound_with_status_payload(env):
+    monitor, session, db = env
+    # Cellular went down: daemon is in DEGRADED, interface info is stale.
+    monitor.store.set_state(State.DEGRADED, last_error="connection lost")
+    assert monitor.probe(STATUS_PROFILE) is True
+    assert session.bound_interfaces == [None]  # any working route (eth/wlan)
+    body = session.calls[0]["data"].decode()
+    assert '"status":"degraded"' in body
+    assert '"msg":"recovery in progress: connection lost"' in body
+
+
+def test_connected_probe_reports_connected_status(env):
+    monitor, session, _ = env
+    monitor.store.update(operator="Hologram")
+    monitor.probe(STATUS_PROFILE)
+    body = session.calls[0]["data"].decode()
+    assert '"status":"connected"' in body
+    assert "via Hologram" in body
+
+
+def test_send_when_degraded_default_on():
+    assert PROFILE.monitor.send_when_degraded is True

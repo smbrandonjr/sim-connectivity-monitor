@@ -76,6 +76,10 @@ class MonitorRequest(StrictModel):
 class MonitorConfig(StrictModel):
     enabled: bool = False
     interval_seconds: int = Field(default=300, ge=10)
+    # Keep heartbeating over any available interface (ethernet/wifi) while
+    # cellular is down, so the endpoint sees {status}=degraded instead of
+    # silence. When false, probes pause until cellular reconnects.
+    send_when_degraded: bool = True
     request: MonitorRequest | None = None
 
     @model_validator(mode="after")

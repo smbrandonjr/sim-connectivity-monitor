@@ -148,9 +148,19 @@ Files added by hand need a `Reload` — easiest is editing anything in the web U
 the device; never commit them** (the repo gitignores them).
 
 Available monitor placeholders: `{iccid} {imei} {imsi} {operator} {signal_rssi}
-{signal_percent} {ip_address} {interface} {hostname} {timestamp} {state} {profile_name}`.
-On the Pi, the heartbeat socket is **bound to the cellular interface**, so a success
-proves cellular egress even while ethernet is connected.
+{signal_percent} {ip_address} {interface} {hostname} {timestamp} {state} {profile_name}
+{status} {status_message}`.
+
+**Heartbeats while cellular is down:** probes don't stop when the connection drops.
+While cellular is **up**, the socket is bound to the cellular interface, so a success
+proves cellular egress even with ethernet connected — and `{status}` renders as
+`connected`. While cellular is **down** but the Pi still has another route
+(ethernet/Wi-Fi), probes keep firing unbound over whatever works, with
+`{status}` = `degraded` and `{status_message}` carrying a one-line reason
+(e.g. `recovery in progress: connect failed: ...`, `modem found, waiting for SIM: no SIM
+inserted`). During a fallback test `{status}` is `fallback_test` so you can suppress
+alerts for intentional outages. Set `monitor.send_when_degraded: false` in a profile to
+restore pause-until-reconnected behavior.
 
 ## 7. Test Hologram fallback / outage protection
 
@@ -193,15 +203,18 @@ Run through this once per new modem model / OS image:
    work while MM is connected (no port fighting in the logs).
 4. `ip route show default`: cellular metric 50 wins; web UI + SSH still reachable via LAN.
 5. Pull ethernet → traffic flows via cellular; restore → cellular stays preferred.
-6. Heartbeat arrives at your endpoint with the **cellular** source IP while ethernet is up.
-7. `sudo mmcli -m 0 --command='AT+CGDCONT?'`… or check Events: PDP contexts equal the
+6. Heartbeat arrives at your endpoint with the **cellular** source IP while ethernet is up,
+   and the payload reports `status=connected`.
+7. Unscrew the antenna / `sudo mmcli -m 0 --disable` with ethernet connected → heartbeats
+   keep arriving (now via ethernet) with `status=degraded` and a sensible `status_message`.
+8. `sudo mmcli -m 0 --command='AT+CGDCONT?'`… or check Events: PDP contexts equal the
    profile exactly (extras deleted on connect).
-8. 2-minute fallback test round-trips; Events show before/after ICCID.
-9. Hot-swap SIMs while running → new profile applied automatically.
-10. `sudo mmcli -m 0 --disable` → supervisor recovers without a service restart.
-11. `sudo kill -STOP $(pidof -x python | head -1)` (or the sim-monitor PID) → systemd
+9. 2-minute fallback test round-trips; Events show before/after ICCID.
+10. Hot-swap SIMs while running → new profile applied automatically.
+11. `sudo mmcli -m 0 --disable` → supervisor recovers without a service restart.
+12. `sudo kill -STOP $(pidof -x python | head -1)` (or the sim-monitor PID) → systemd
     watchdog restarts it once; no restart loop.
-12. Reboot → reconnects unattended within ~1–2 min of boot.
+13. Reboot → reconnects unattended within ~1–2 min of boot.
 
 ---
 
