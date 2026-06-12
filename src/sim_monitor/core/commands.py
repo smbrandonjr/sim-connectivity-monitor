@@ -1,0 +1,78 @@
+"""Commands the web UI (or CLI) sends to the daemon via a queue.
+
+The daemon drains the queue at the start of every tick; handlers run inside
+the daemon thread, so they may touch the modem/backend freely.
+"""
+
+from __future__ import annotations
+
+import queue
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Reconnect:
+    pass
+
+
+@dataclass(frozen=True)
+class ResetModem:
+    pass
+
+
+@dataclass(frozen=True)
+class ForceProfile:
+    name: str
+
+
+@dataclass(frozen=True)
+class ReleaseForce:
+    pass
+
+
+@dataclass(frozen=True)
+class StartFallbackTest:
+    duration_seconds: int | None = None  # None = use profile's fallback_test setting
+
+
+@dataclass(frozen=True)
+class AbortFallbackTest:
+    pass
+
+
+@dataclass(frozen=True)
+class RunMonitorNow:
+    pass
+
+
+@dataclass(frozen=True)
+class ReloadProfiles:
+    pass
+
+
+Command = (
+    Reconnect
+    | ResetModem
+    | ForceProfile
+    | ReleaseForce
+    | StartFallbackTest
+    | AbortFallbackTest
+    | RunMonitorNow
+    | ReloadProfiles
+)
+
+
+class CommandQueue:
+    def __init__(self) -> None:
+        self._q: queue.Queue[Command] = queue.Queue()
+
+    def put(self, command: Command) -> None:
+        self._q.put(command)
+
+    def drain(self) -> list[Command]:
+        commands = []
+        while True:
+            try:
+                commands.append(self._q.get_nowait())
+            except queue.Empty:
+                return commands

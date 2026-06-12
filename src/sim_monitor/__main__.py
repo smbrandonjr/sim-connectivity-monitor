@@ -46,9 +46,9 @@ def main(argv: list[str] | None = None) -> int:
         log.error("hardware mode is not implemented yet -- run with --simulate")
         return 1
 
-    # Phase 1 wires up the daemon/monitor/web threads here (app.run(config, profiles)).
-    log.info("no modem (simulated) -- core engine arrives in Phase 1")
-    return 0
+    from sim_monitor import app
+
+    return app.run(config, profiles)
 
 
 if __name__ == "__main__":
