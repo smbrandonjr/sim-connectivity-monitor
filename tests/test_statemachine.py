@@ -208,9 +208,10 @@ class TestRecovery:
         assert harness.backend.disable_enable_calls == 1
         harness.tick(2)  # configure, connect fails -> failure 3
         assert harness.daemon.supervisor.failures == 3
-        # rung 3: AT reset after 40s -> back to NO_MODEM redetect
+        # rung 3: AT reset after 40s -> FPLMN cleared first, then NO_MODEM redetect
         harness.tick(advance=41)
-        assert "RESET" in harness.driver.at_log
+        assert "CLEAR_FPLMN" in harness.driver.at_log
+        assert harness.driver.at_log.index("CLEAR_FPLMN") < harness.driver.at_log.index("RESET")
         assert harness.daemon.state is State.NO_MODEM
 
     def test_recovers_when_failure_clears(self, harness):

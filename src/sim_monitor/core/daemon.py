@@ -385,6 +385,17 @@ class Daemon:
                     self._go(S.CONFIGURING)
                 case RecoveryAction.AT_RESET:
                     if self.driver:
+                        try:
+                            # Persistent registration failure may mean in-plan
+                            # carriers got onto the SIM's forbidden list.
+                            self.driver.clear_forbidden_plmn()
+                            self.events.info(
+                                "recovery", "cleared SIM forbidden-PLMN list"
+                            )
+                        except ModemError as e:
+                            self.events.warning(
+                                "recovery", f"FPLMN clear failed: {e}"
+                            )
                         self.driver.full_reset()
                     self._drop_modem()
                 case RecoveryAction.USB_POWER_CYCLE:

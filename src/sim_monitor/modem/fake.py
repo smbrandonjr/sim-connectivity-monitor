@@ -94,6 +94,10 @@ class FakeModemDriver(ModemDriver):
         self.at_log.append("RESET")
         self.airplane = False
 
+    def clear_forbidden_plmn(self) -> None:
+        self._check()
+        self.at_log.append("CLEAR_FPLMN")
+
     def run_init_commands(self, commands: list[str]) -> None:
         self._check()
         self.at_log.extend(commands)

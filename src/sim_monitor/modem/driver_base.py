@@ -81,6 +81,14 @@ class ModemDriver(ABC):
     def set_airplane(self, on: bool) -> None: ...
 
     @abstractmethod
+    def clear_forbidden_plmn(self) -> None:
+        """Wipe the SIM's forbidden-PLMN list (EF_FPLMN).
+
+        Repeated attach rejects (e.g. retry storms, out-of-plan carriers) get
+        in-plan networks blacklisted ON THE SIM, persisting across reboots and
+        power cycles. Clearing it lets the modem retry every carrier."""
+
+    @abstractmethod
     def full_reset(self) -> None:
         """Vendor-specific full modem reboot (AT+CFUN=1,1 / AT+CRESET / AT#REBOOT)."""
 
