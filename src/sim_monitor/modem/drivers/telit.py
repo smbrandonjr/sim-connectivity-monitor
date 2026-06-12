@@ -11,6 +11,11 @@ class TelitDriver(ATModemDriver):
     VENDOR_IDS = frozenset({0x1BC7})
     ICCID_COMMAND = "AT#CCID"
     RESET_COMMAND = "AT#REBOOT"
+    DIAGNOSTIC_COMMANDS = [
+        *ATModemDriver.DIAGNOSTIC_COMMANDS,
+        "AT#RFSTS",   # serving cell / RF status
+        "AT#CCID",
+    ]
 
     def _set_auth(self, context: PdpContext) -> None:
         self.at.execute(

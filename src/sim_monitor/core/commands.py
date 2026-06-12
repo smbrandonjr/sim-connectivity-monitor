@@ -46,6 +46,11 @@ class RunMonitorNow:
 
 
 @dataclass(frozen=True)
+class RunDiagnostics:
+    commands: tuple[str, ...] = ()  # empty = the driver's standard bundle
+
+
+@dataclass(frozen=True)
 class ReloadProfiles:
     pass
 
@@ -58,6 +63,7 @@ Command = (
     | StartFallbackTest
     | AbortFallbackTest
     | RunMonitorNow
+    | RunDiagnostics
     | ReloadProfiles
 )
 

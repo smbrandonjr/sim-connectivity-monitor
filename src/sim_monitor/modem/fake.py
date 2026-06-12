@@ -98,6 +98,22 @@ class FakeModemDriver(ModemDriver):
         self._check()
         self.at_log.extend(commands)
 
+    def execute_raw(self, command: str) -> list[str]:
+        self._check()
+        self.at_log.append(command)
+        canned = {
+            "AT+CSQ": ["+CSQ: 18,99"],
+            "AT+CREG?": ["+CREG: 0,5"],
+            "AT+CEREG?": ["+CEREG: 0,5"],
+            "AT+COPS?": ['+COPS: 0,0,"Hologram",7'],
+            "AT+CPIN?": ["+CPIN: READY"],
+            "AT+CGDCONT?": [
+                f'+CGDCONT: {c.cid},"{c.pdp_type}","{c.apn}"'
+                for c in self.get_pdp_contexts()
+            ],
+        }
+        return canned.get(command, [f"{command}: simulated OK"])
+
 
 class FakeDetector(ModemDetector):
     """Returns the fake driver, optionally only after N detect() calls."""

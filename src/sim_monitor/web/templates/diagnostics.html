@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Diagnostics — sim-monitor{% endblock %}
+{% block content %}
+<h1>Diagnostics</h1>
+<p class="muted">
+  Runs AT commands over the daemon's dedicated serial port — safe while the service is
+  running; no need to stop anything or use minicom. Results land below within one
+  daemon tick (~5 s).
+</p>
+
+<section class="card">
+  <form method="post" action="{{ url_for('diagnostics.run') }}">
+    <button type="submit">Run standard diagnostics</button>
+    <span class="muted">signal, registration, operator, PDP contexts + vendor checks
+      (roaming/scan config on Quectel)</span>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Custom AT commands</h2>
+  <form method="post" action="{{ url_for('diagnostics.run') }}">
+    <textarea name="commands" rows="5" spellcheck="false"
+      placeholder="One AT command per line, e.g.&#10;AT+CEREG?&#10;AT+QNWINFO"></textarea>
+    <div class="row"><button type="submit">Run commands</button></div>
+  </form>
+  <p class="muted">Commands run exactly as typed (max 20). Mutating commands (CFUN,
+    QCFG writes, CRSM) are allowed — you own the device — but know what you're sending.</p>
+</section>
+
+{% if snap.diagnostics %}
+<section class="card">
+  <h2>Results — {{ snap.diagnostics.ran_at | ts }}</h2>
+  {% if snap.diagnostics.note %}
+    <p class="error-text">{{ snap.diagnostics.note }}</p>
+  {% endif %}
+  <table>
+    <thead><tr><th>Command</th><th>Response</th></tr></thead>
+    <tbody>
+    {% for e in snap.diagnostics.entries %}
+      <tr class="{{ 'level-info' if e.ok else 'level-error' }}">
+        <td class="nowrap"><code>{{ e.command }}</code></td>
+        <td><pre class="at-output">{{ e.output }}</pre></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <details>
+    <summary class="muted">Copy-paste view (plain text)</summary>
+    <pre class="at-output">{% for e in snap.diagnostics.entries %}> {{ e.command }}
+{{ e.output }}
+
+{% endfor %}</pre>
+  </details>
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+  // Reload when a newer report lands (the daemon processes the queue async).
+  const shownRanAt = {{ snap.diagnostics.ran_at if snap.diagnostics else 0 }};
+  setInterval(async () => {
+    try {
+      const res = await fetch("/api/status.json", { cache: "no-store" });
+      const data = await res.json();
+      const ranAt = data.diagnostics ? data.diagnostics.ran_at : 0;
+      if (ranAt !== shownRanAt) location.reload();
+    } catch (e) { /* transient */ }
+  }, 2000);
+</script>
+{% endblock %}

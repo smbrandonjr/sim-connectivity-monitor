@@ -18,7 +18,12 @@ from sim_monitor.config.schema import AppConfig, Profile
 from sim_monitor.core import commands as cmd
 from sim_monitor.core.commands import CommandQueue
 from sim_monitor.core.events import EventLog
-from sim_monitor.core.state_store import FallbackStatus, StateStore
+from sim_monitor.core.state_store import (
+    DiagnosticEntry,
+    DiagnosticsReport,
+    FallbackStatus,
+    StateStore,
+)
 from sim_monitor.core.states import State
 from sim_monitor.core.supervisor import RecoveryAction, Supervisor
 from sim_monitor.modem.driver_base import ModemDetector, ModemDriver, ModemError
@@ -148,6 +153,8 @@ class Daemon:
                     self._end_fallback_test()
             case cmd.RunMonitorNow():
                 self.monitor_trigger.set()
+            case cmd.RunDiagnostics(commands=requested):
+                self._run_diagnostics(requested)
             case cmd.ReloadProfiles():
                 self._reload_profiles()
 
@@ -392,6 +399,30 @@ class Daemon:
             return
         self.events.info("fallback", "airplane-mode window elapsed; re-enabling radio")
         self._end_fallback_test()
+
+    def _run_diagnostics(self, requested: tuple[str, ...]) -> None:
+        """Run AT diagnostics over the dedicated port (UI Diagnostics page)."""
+        if self.driver is None:
+            self.store.update(
+                diagnostics=DiagnosticsReport(
+                    ran_at=time.time(), note="no modem detected; cannot run AT commands"
+                )
+            )
+            return
+        commands = list(requested) or self.driver.DIAGNOSTIC_COMMANDS
+        entries = []
+        for command in commands[:20]:  # bound the tick's serial time
+            try:
+                lines = self.driver.execute_raw(command)
+                entries.append(
+                    DiagnosticEntry(command, "\n".join(lines) or "OK", ok=True)
+                )
+            except ModemError as e:
+                entries.append(DiagnosticEntry(command, str(e), ok=False))
+        self.store.update(
+            diagnostics=DiagnosticsReport(ran_at=time.time(), entries=tuple(entries))
+        )
+        self.events.info("diagnostics", f"ran {len(entries)} diagnostic command(s)")
 
     # ------------------------------------------------------------- fallback
 

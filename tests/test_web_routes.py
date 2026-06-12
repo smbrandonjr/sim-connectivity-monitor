@@ -160,6 +160,34 @@ class TestProfilesCrud:
         assert cmd.ReleaseForce() in drained
 
 
+class TestDiagnostics:
+    def test_page_renders(self, sim, client):
+        page = client.get("/diagnostics/")
+        assert page.status_code == 200
+        assert b"Run standard diagnostics" in page.data
+
+    def test_run_standard_bundle(self, sim, client):
+        response = client.post("/diagnostics/run", data={"commands": ""})
+        assert response.status_code == 302
+        assert cmd.RunDiagnostics(commands=()) in sim.commands.drain()
+
+    def test_run_custom_commands(self, sim, client):
+        client.post("/diagnostics/run", data={"commands": "AT+CEREG?\n\n at+csq \n"})
+        assert cmd.RunDiagnostics(commands=("AT+CEREG?", "at+csq")) in sim.commands.drain()
+
+    def test_non_at_commands_rejected(self, sim, client):
+        client.post("/diagnostics/run", data={"commands": "rm -rf /"})
+        assert sim.commands.drain() == []
+
+    def test_results_render(self, sim, client):
+        tick_until_connected(sim)
+        sim.commands.put(cmd.RunDiagnostics())
+        sim.daemon.tick()
+        page = client.get("/diagnostics/")
+        assert b"AT+CSQ" in page.data
+        assert b"+CSQ: 18,99" in page.data
+
+
 class TestLogs:
     def test_events_page(self, sim, client):
         tick_until_connected(sim)

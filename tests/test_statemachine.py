@@ -327,3 +327,37 @@ class TestCommands:
         harness.queue.put(cmd.RunMonitorNow())
         harness.tick()
         assert harness.daemon.monitor_trigger.is_set()
+
+    def test_diagnostics_standard_bundle(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.queue.put(cmd.RunDiagnostics())
+        harness.tick()
+        report = harness.store.get().diagnostics
+        assert report is not None and report.note == ""
+        commands = [e.command for e in report.entries]
+        assert commands == harness.driver.DIAGNOSTIC_COMMANDS
+        csq = next(e for e in report.entries if e.command == "AT+CSQ")
+        assert csq.ok and csq.output == "+CSQ: 18,99"
+
+    def test_diagnostics_custom_commands_and_errors(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.queue.put(cmd.RunDiagnostics(commands=("AT+CEREG?", "AT+CSQ")))
+        harness.tick()
+        report = harness.store.get().diagnostics
+        assert [e.command for e in report.entries] == ["AT+CEREG?", "AT+CSQ"]
+        # A wedged modem reports per-command errors, doesn't crash the tick.
+        harness.driver.fail_all = True
+        harness.queue.put(cmd.RunDiagnostics(commands=("AT+CSQ",)))
+        harness.tick()
+        entry = harness.store.get().diagnostics.entries[0]
+        assert not entry.ok
+        assert "simulated modem failure" in entry.output
+
+    def test_diagnostics_without_modem(self, tmp_path):
+        h = Harness(tmp_path, appear_after=99)
+        h.tick()
+        h.queue.put(cmd.RunDiagnostics())
+        h.tick()
+        report = h.store.get().diagnostics
+        assert report.entries == ()
+        assert "no modem" in report.note

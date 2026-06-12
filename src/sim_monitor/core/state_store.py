@@ -50,6 +50,20 @@ def derive_status(snapshot: Snapshot) -> tuple[str, str]:
 
 
 @dataclass(frozen=True)
+class DiagnosticEntry:
+    command: str
+    output: str
+    ok: bool
+
+
+@dataclass(frozen=True)
+class DiagnosticsReport:
+    ran_at: float
+    entries: tuple[DiagnosticEntry, ...] = ()
+    note: str = ""  # e.g. "no modem detected" when commands could not run
+
+
+@dataclass(frozen=True)
 class FallbackStatus:
     active: bool = False
     until: float | None = None  # epoch seconds when airplane mode ends
@@ -77,6 +91,7 @@ class Snapshot:
     profile_count: int = 0
     last_error: str | None = None
     fallback: FallbackStatus = field(default_factory=FallbackStatus)
+    diagnostics: DiagnosticsReport | None = None
     updated_at: float = field(default_factory=time.time)
 
     def placeholder_context(self) -> dict[str, Any]:

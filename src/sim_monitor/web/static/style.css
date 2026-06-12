@@ -51,3 +51,6 @@ textarea { width: 100%; font: 13px/1.45 ui-monospace, Consolas, monospace; paddi
 input[type=number] { padding: 6px; border: 1px solid var(--border); border-radius: 6px; }
 select { padding: 6px; border: 1px solid var(--border); border-radius: 6px; }
 code { background: #eef2f5; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+pre.at-output { margin: 0; font: 13px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+details { margin-top: 10px; }
+summary { cursor: pointer; }

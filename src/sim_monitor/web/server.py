@@ -27,13 +27,14 @@ def create_app(sim_app) -> Flask:
             return ""
         return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(value))
 
-    from sim_monitor.web.routes import actions, api, logs, profiles, status
+    from sim_monitor.web.routes import actions, api, diagnostics, logs, profiles, status
 
     flask_app.register_blueprint(status.bp)
     flask_app.register_blueprint(api.bp)
     flask_app.register_blueprint(profiles.bp)
     flask_app.register_blueprint(actions.bp)
     flask_app.register_blueprint(logs.bp)
+    flask_app.register_blueprint(diagnostics.bp)
     return flask_app
 
 

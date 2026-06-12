@@ -106,3 +106,6 @@ class ATModemDriver(ModemDriver):
     def run_init_commands(self, commands: list[str]) -> None:
         for command in commands:
             self.at.execute(command, timeout=15)
+
+    def execute_raw(self, command: str) -> list[str]:
+        return self.at.execute(command, timeout=10)

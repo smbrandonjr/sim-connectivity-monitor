@@ -41,6 +41,21 @@ class ModemDriver(ABC):
 
     name: str = "base"
 
+    # Read-only commands for the web UI's Diagnostics page; vendor drivers
+    # extend with their quirk queries.
+    DIAGNOSTIC_COMMANDS: list[str] = [
+        "AT+CSQ",
+        "AT+CREG?",
+        "AT+CEREG?",
+        "AT+COPS?",
+        "AT+CPIN?",
+        "AT+CGDCONT?",
+    ]
+
+    @abstractmethod
+    def execute_raw(self, command: str) -> list[str]:
+        """Run one raw AT command and return its payload lines."""
+
     @abstractmethod
     def get_identity(self) -> ModemIdentity: ...
 
