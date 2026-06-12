@@ -61,20 +61,35 @@ def build(config: AppConfig, profiles: list[Profile]) -> App:
 
 
 def run(config: AppConfig, profiles: list[Profile]) -> int:
+    from sim_monitor.monitor.http_monitor import HttpMonitor
+    from sim_monitor.web import server
+
     app = build(config, profiles)
     daemon_thread = threading.Thread(
         target=app.daemon.run, args=(app.stop,), name="daemon", daemon=True
     )
     daemon_thread.start()
-    log.info("daemon thread started; press Ctrl+C to stop")
+
+    monitor = HttpMonitor(
+        store=app.store,
+        db=app.db,
+        events=app.events,
+        get_profile=lambda: app.daemon.active_profile,
+        trigger=app.daemon.monitor_trigger,
+    )
+    monitor_thread = threading.Thread(
+        target=monitor.run, args=(app.stop,), name="monitor", daemon=True
+    )
+    monitor_thread.start()
+
+    flask_app = server.create_app(app)
     try:
-        # Phase 2 replaces this idle wait with the waitress/Flask server.
-        while daemon_thread.is_alive():
-            daemon_thread.join(timeout=1)
+        server.serve(flask_app, config.web.host, config.web.port)
     except KeyboardInterrupt:
         log.info("stopping")
     finally:
         app.stop.set()
         daemon_thread.join(timeout=10)
+        monitor_thread.join(timeout=5)
         app.db.close()
     return 0

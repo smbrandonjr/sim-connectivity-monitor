@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Events — sim-monitor{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>Events</h1>
+  <form method="get" action="{{ url_for('logs.events') }}" class="inline">
+    <select name="kind" onchange="this.form.submit()">
+      <option value="">all kinds</option>
+      {% for k in kinds %}
+      <option value="{{ k }}" {% if k == selected %}selected{% endif %}>{{ k }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+<table>
+  <thead><tr><th>Time</th><th>Level</th><th>Kind</th><th>Message</th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr class="level-{{ e.level }}">
+      <td class="nowrap">{{ e.ts | ts }}</td>
+      <td>{{ e.level }}</td>
+      <td>{{ e.kind }}</td>
+      <td>{{ e.message }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">No events.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

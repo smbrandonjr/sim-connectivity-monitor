@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — sim-monitor{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>Status</h1>
+  <span id="state-badge" class="badge state-{{ snap.state.value }}">{{ snap.state.value }}</span>
+</div>
+
+<div id="fallback-banner" class="banner" {% if not snap.fallback.active %}hidden{% endif %}>
+  Fallback test in progress — airplane mode ends in <strong id="fallback-remaining">…</strong>
+  <form method="post" action="{{ url_for('actions.fallback_abort') }}" class="inline">
+    <button type="submit" class="danger">Abort</button>
+  </form>
+</div>
+
+<div class="cards">
+  <section class="card">
+    <h2>Modem</h2>
+    <dl>
+      <dt>Vendor / model</dt><dd><span data-f="vendor">{{ snap.vendor or "—" }}</span> <span data-f="model">{{ snap.model or "" }}</span></dd>
+      <dt>IMEI</dt><dd data-f="imei">{{ snap.imei or "—" }}</dd>
+      <dt>Operator</dt><dd data-f="operator">{{ snap.operator or "—" }}</dd>
+      <dt>Signal</dt><dd><span data-f="signal">{% if snap.signal_rssi is not none %}{{ snap.signal_rssi }} dBm ({{ snap.signal_percent }}%){% else %}—{% endif %}</span></dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>SIM</h2>
+    <dl>
+      <dt>Present</dt><dd data-f="sim_present">{{ "yes" if snap.sim_present else "no" }}</dd>
+      <dt>ICCID</dt><dd data-f="iccid">{{ snap.iccid or "—" }}</dd>
+      <dt>IMSI</dt><dd data-f="imsi">{{ snap.imsi or "—" }}</dd>
+      <dt>Active profile</dt><dd><span data-f="active_profile">{{ snap.active_profile or "—" }}</span>{% if snap.forced_profile %} <span class="badge badge-warn" id="forced-badge">forced</span>{% endif %}</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>Network</h2>
+    <dl>
+      <dt>Interface</dt><dd data-f="interface">{{ snap.interface or "—" }}</dd>
+      <dt>IP address</dt><dd data-f="ip_address">{{ snap.ip_address or "—" }}</dd>
+      <dt>Default route OK</dt><dd data-f="routing_ok">{{ "yes" if snap.routing_ok else ("no" if snap.routing_ok is not none else "—") }}</dd>
+      <dt>Last error</dt><dd data-f="last_error" class="error-text">{{ snap.last_error or "—" }}</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>Last monitor probe</h2>
+    {% if last_monitor %}
+    <dl>
+      <dt>Result</dt><dd data-f="monitor_ok">{{ "ok" if last_monitor.ok else "FAILED" }}</dd>
+      <dt>Status / latency</dt><dd data-f="monitor_detail">{{ last_monitor.status_code or "—" }} / {{ "%.0f"|format(last_monitor.latency_ms or 0) }} ms</dd>
+      <dt>Error</dt><dd data-f="monitor_error">{{ last_monitor.error or "—" }}</dd>
+    </dl>
+    {% else %}<p data-f="monitor_none">No probes recorded yet.</p>{% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2>Actions</h2>
+  <div class="actions">
+    <form method="post" action="{{ url_for('actions.reconnect') }}"><button type="submit">Reconnect</button></form>
+    <form method="post" action="{{ url_for('actions.reset_modem') }}"><button type="submit" class="danger">Reset modem</button></form>
+    <form method="post" action="{{ url_for('actions.monitor_now') }}"><button type="submit">Run monitor now</button></form>
+    <form method="post" action="{{ url_for('actions.fallback_test') }}" class="inline">
+      <label>Fallback test, seconds:
+        <input type="number" name="duration_seconds" min="10" placeholder="900" size="6">
+      </label>
+      <button type="submit" class="danger">Start fallback test</button>
+    </form>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='app.js') }}"></script>{% endblock %}

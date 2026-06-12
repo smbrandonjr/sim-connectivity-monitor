@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Profiles — sim-monitor{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>Profiles</h1>
+  <a class="button" href="{{ url_for('profiles.new_profile') }}">New profile</a>
+</div>
+
+{% if snap.forced_profile %}
+<div class="banner">
+  Profile <strong>{{ snap.forced_profile }}</strong> is forced (ICCID matching bypassed).
+  <form method="post" action="{{ url_for('profiles.release_force') }}" class="inline">
+    <button type="submit">Release</button>
+  </form>
+</div>
+{% endif %}
+
+{% for err in errors %}
+<div class="flash flash-error">{{ err.path.name }}: {{ err.error }}</div>
+{% endfor %}
+
+<table>
+  <thead>
+    <tr><th>Name</th><th>ICCID patterns</th><th>Priority</th><th>PDP contexts</th><th>Monitor</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for p in profiles %}
+    <tr>
+      <td>
+        <strong>{{ p.name }}</strong>
+        {% if p.name == snap.active_profile %}<span class="badge badge-ok">active</span>{% endif %}
+        {% if p.name == snap.forced_profile %}<span class="badge badge-warn">forced</span>{% endif %}
+        {% if p.description %}<div class="muted">{{ p.description }}</div>{% endif %}
+      </td>
+      <td>{{ p.match.iccid_patterns | join(", ") }}</td>
+      <td>{{ p.match.priority }}</td>
+      <td>
+        {% for c in p.pdp_contexts %}
+          <code>cid{{ c.cid }} {{ c.apn }} {{ c.pdp_type }}{% if c.bearer %} ★{% endif %}</code><br>
+        {% endfor %}
+      </td>
+      <td>{{ "every %ds"|format(p.monitor.interval_seconds) if p.monitor.enabled else "off" }}</td>
+      <td class="actions-cell">
+        <form method="post" action="{{ url_for('profiles.force_profile', name=p.name) }}" class="inline"><button type="submit">Force</button></form>
+        <a class="button" href="{{ url_for('profiles.edit_profile', name=p.name) }}">Edit</a>
+        <form method="post" action="{{ url_for('profiles.delete_profile', name=p.name) }}" class="inline"
+              onsubmit="return confirm('Delete profile {{ p.name }}?')">
+          <button type="submit" class="danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6">No profiles found in the profiles directory.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">★ = bearer context (its APN is used for the data connection). The modem is
+reconciled to exactly the listed contexts. Lower priority number wins ties.</p>
+{% endblock %}

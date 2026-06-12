@@ -85,21 +85,23 @@ def profile_path(profiles_dir: Path, name: str) -> Path:
 def save_profile(profiles_dir: Path, profile: Profile) -> Path:
     """Write a profile as YAML (used by the web UI). Returns the file path."""
     profiles_dir.mkdir(parents=True, exist_ok=True)
-    path = _find_existing(profiles_dir, profile.name) or profile_path(profiles_dir, profile.name)
+    path = find_profile_file(profiles_dir, profile.name) or profile_path(
+        profiles_dir, profile.name
+    )
     data = profile.model_dump(mode="json")
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return path
 
 
 def delete_profile(profiles_dir: Path, name: str) -> bool:
-    path = _find_existing(profiles_dir, name)
+    path = find_profile_file(profiles_dir, name)
     if path is None:
         return False
     path.unlink()
     return True
 
 
-def _find_existing(profiles_dir: Path, name: str) -> Path | None:
+def find_profile_file(profiles_dir: Path, name: str) -> Path | None:
     """Locate the file holding a profile by name (filename may not equal name)."""
     if not profiles_dir.is_dir():
         return None

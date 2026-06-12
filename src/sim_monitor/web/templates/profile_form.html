@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — sim-monitor{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+<form method="post" action="{{ action }}">
+  <textarea name="yaml_text" rows="28" spellcheck="false">{{ yaml_text }}</textarea>
+  <div class="row">
+    <button type="submit">Save</button>
+    <a class="button" href="{{ url_for('profiles.list_profiles') }}">Cancel</a>
+  </div>
+</form>
+<p class="muted">
+  Profiles are validated on save: 1–3 PDP contexts with unique CIDs, exactly one
+  <code>bearer: true</code>, ICCID patterns as digits with optional trailing <code>*</code>.
+  Placeholders for monitor requests: <code>{iccid} {imei} {imsi} {operator} {signal_rssi}
+  {signal_percent} {ip_address} {hostname} {timestamp} {state} {profile_name}</code>.
+</p>
+{% endblock %}

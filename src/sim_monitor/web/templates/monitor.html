@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Monitor — sim-monitor{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>Monitor history</h1>
+  <form method="post" action="{{ url_for('actions.monitor_now') }}" class="inline">
+    <button type="submit">Run probe now</button>
+  </form>
+</div>
+<table>
+  <thead><tr><th>Time</th><th>Result</th><th>Status</th><th>Latency</th><th>URL</th><th>Error</th></tr></thead>
+  <tbody>
+  {% for r in results %}
+    <tr class="{{ 'level-info' if r.ok else 'level-error' }}">
+      <td class="nowrap">{{ r.ts | ts }}</td>
+      <td>{{ "ok" if r.ok else "FAILED" }}</td>
+      <td>{{ r.status_code or "—" }}</td>
+      <td>{{ "%.0f ms"|format(r.latency_ms) if r.latency_ms is not none else "—" }}</td>
+      <td class="break">{{ r.url }}</td>
+      <td class="break">{{ r.error or "" }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6">No monitor results yet. Enable the monitor in the active profile, or run a probe now.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
