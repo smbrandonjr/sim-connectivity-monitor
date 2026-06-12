@@ -53,7 +53,7 @@ class ModemDriver(ABC):
     ]
 
     @abstractmethod
-    def execute_raw(self, command: str) -> list[str]:
+    def execute_raw(self, command: str, timeout: float | None = None) -> list[str]:
         """Run one raw AT command and return its payload lines."""
 
     @abstractmethod

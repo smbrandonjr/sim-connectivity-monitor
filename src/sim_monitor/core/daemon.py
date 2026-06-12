@@ -412,8 +412,12 @@ class Daemon:
         commands = list(requested) or self.driver.DIAGNOSTIC_COMMANDS
         entries = []
         for command in commands[:20]:  # bound the tick's serial time
+            if self.notifier:
+                self.notifier.watchdog()  # long scans must not trip WatchdogSec
+            # Network scans legitimately take minutes; everything else is fast.
+            timeout = 100 if command.upper().startswith("AT+COPS=?") else 10
             try:
-                lines = self.driver.execute_raw(command)
+                lines = self.driver.execute_raw(command, timeout=timeout)
                 entries.append(
                     DiagnosticEntry(command, "\n".join(lines) or "OK", ok=True)
                 )

@@ -98,7 +98,7 @@ class FakeModemDriver(ModemDriver):
         self._check()
         self.at_log.extend(commands)
 
-    def execute_raw(self, command: str) -> list[str]:
+    def execute_raw(self, command: str, timeout: float | None = None) -> list[str]:
         self._check()
         self.at_log.append(command)
         canned = {
