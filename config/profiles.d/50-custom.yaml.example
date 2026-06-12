@@ -53,6 +53,7 @@ monitor:
   enabled: true
   interval_seconds: 300
   send_when_degraded: true   # false = pause probes until cellular reconnects
+  bind_cellular: true        # false = endpoint only reachable via LAN/VPN (testing)
   request:
     method: POST
     url: "https://hooks.example.com/heartbeat"

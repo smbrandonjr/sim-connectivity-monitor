@@ -80,6 +80,10 @@ class MonitorConfig(StrictModel):
     # cellular is down, so the endpoint sees {status}=degraded instead of
     # silence. When false, probes pause until cellular reconnects.
     send_when_degraded: bool = True
+    # Bind the probe socket to the cellular interface while connected, so a
+    # success PROVES cellular egress. Set false when the endpoint is only
+    # reachable via LAN/VPN (e.g. testing against a local server).
+    bind_cellular: bool = True
     request: MonitorRequest | None = None
 
     @model_validator(mode="after")

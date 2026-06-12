@@ -82,7 +82,9 @@ class HttpMonitor:
         assert request is not None
         snapshot = self.store.get()
         bind_interface = (
-            snapshot.interface if snapshot.state is State.CONNECTED else None
+            snapshot.interface
+            if snapshot.state is State.CONNECTED and profile.monitor.bind_cellular
+            else None
         )
         url, headers, body, unknown = render_request(
             request.url, request.headers, request.body, snapshot.placeholder_context()

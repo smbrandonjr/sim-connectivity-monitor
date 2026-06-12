@@ -114,6 +114,14 @@ def test_probe_binds_cellular_while_connected(env):
     assert session.bound_interfaces == ["wwan0"]
 
 
+def test_bind_cellular_false_for_lan_endpoints(env):
+    monitor, session, _ = env
+    lan_profile = PROFILE.model_copy(deep=True)
+    lan_profile.monitor.bind_cellular = False
+    monitor.probe(lan_profile)
+    assert session.bound_interfaces == [None]  # routed normally (LAN reachable)
+
+
 STATUS_PROFILE = Profile.model_validate(
     {
         "name": "status-monitored",
