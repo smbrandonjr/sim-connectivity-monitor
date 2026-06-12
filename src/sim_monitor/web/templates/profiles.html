@@ -8,7 +8,8 @@
 
 {% if snap.forced_profile %}
 <div class="banner">
-  Profile <strong>{{ snap.forced_profile }}</strong> is forced (ICCID matching bypassed).
+  <strong>{{ snap.forced_profile }}</strong> is forced on — automatic SIM matching is
+  paused until you release it.
   <form method="post" action="{{ url_for('profiles.release_force') }}" class="inline">
     <button type="submit">Release</button>
   </form>
@@ -21,27 +22,46 @@
 
 <table>
   <thead>
-    <tr><th>Name</th><th>ICCID patterns</th><th>Priority</th><th>PDP contexts</th><th>Monitor</th><th></th></tr>
+    <tr>
+      <th>Name</th>
+      <th title="Which SIMs select this profile, by ICCID. Best match wins: exact beats prefix, longer prefix beats shorter, then lower priority number.">Applies to</th>
+      <th title="Tie-breaker when several profiles match — lower number wins">Priority</th>
+      <th title="The modem is kept to exactly these contexts — extras created by firmware are removed">PDP contexts</th>
+      <th>Heartbeat</th>
+      <th></th>
+    </tr>
   </thead>
   <tbody>
   {% for p in profiles %}
     <tr>
       <td>
         <strong>{{ p.name }}</strong>
-        {% if p.name == snap.active_profile %}<span class="badge badge-ok">active</span>{% endif %}
+        {% if p.name == snap.active_profile %}<span class="badge badge-ok">in use</span>{% endif %}
         {% if p.name == snap.forced_profile %}<span class="badge badge-warn">forced</span>{% endif %}
         {% if p.description %}<div class="muted">{{ p.description }}</div>{% endif %}
       </td>
-      <td>{{ p.match.iccid_patterns | join(", ") }}</td>
+      <td>
+        {% if p.match.iccid_patterns == ["*"] %}any SIM
+        {% else %}{{ p.match.iccid_patterns | join(", ") }}{% endif %}
+      </td>
       <td>{{ p.match.priority }}</td>
       <td>
         {% for c in p.pdp_contexts %}
-          <code>cid{{ c.cid }} {{ c.apn }} {{ c.pdp_type }}{% if c.bearer %} ★{% endif %}</code><br>
+          <div><code>cid {{ c.cid }} · {{ c.apn }} · {{ c.pdp_type }}</code>
+          {% if c.bearer %}<span class="badge badge-ok" title="This context's APN is used for the data connection">data</span>{% endif %}</div>
         {% endfor %}
       </td>
-      <td>{{ "every %ds"|format(p.monitor.interval_seconds) if p.monitor.enabled else "off" }}</td>
+      <td>{{ "every %ds"|format(p.monitor.interval_seconds) if p.monitor.enabled else "—" }}</td>
       <td class="actions-cell">
-        <form method="post" action="{{ url_for('profiles.force_profile', name=p.name) }}" class="inline"><button type="submit">Force</button></form>
+        {% if p.name == snap.forced_profile %}
+        <form method="post" action="{{ url_for('profiles.release_force') }}" class="inline">
+          <button type="submit" title="Resume automatic SIM matching">Release</button>
+        </form>
+        {% else %}
+        <form method="post" action="{{ url_for('profiles.force_profile', name=p.name) }}" class="inline">
+          <button type="submit" title="Use this profile no matter which SIM is inserted, until released — handy for testing">Force</button>
+        </form>
+        {% endif %}
         <a class="button" href="{{ url_for('profiles.edit_profile', name=p.name) }}">Edit</a>
         <form method="post" action="{{ url_for('profiles.delete_profile', name=p.name) }}" class="inline"
               onsubmit="return confirm('Delete profile {{ p.name }}?')">
@@ -50,10 +70,8 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="6">No profiles found in the profiles directory.</td></tr>
+    <tr><td colspan="6">No profiles yet — create one, or re-run the installer to restore the Hologram default.</td></tr>
   {% endfor %}
   </tbody>
 </table>
-<p class="muted">★ = bearer context (its APN is used for the data connection). The modem is
-reconciled to exactly the listed contexts. Lower priority number wins ties.</p>
 {% endblock %}

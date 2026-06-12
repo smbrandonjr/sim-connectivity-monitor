@@ -37,35 +37,54 @@
     <dl>
       <dt>Interface</dt><dd data-f="interface">{{ snap.interface or "—" }}</dd>
       <dt>IP address</dt><dd data-f="ip_address">{{ snap.ip_address or "—" }}</dd>
-      <dt>Default route OK</dt><dd data-f="routing_ok">{{ "yes" if snap.routing_ok else ("no" if snap.routing_ok is not none else "—") }}</dd>
+      <dt>Cellular is default route</dt><dd data-f="routing_ok">{{ "yes" if snap.routing_ok else ("no" if snap.routing_ok is not none else "—") }}</dd>
       <dt>Last error</dt><dd data-f="last_error" class="error-text">{{ snap.last_error or "—" }}</dd>
     </dl>
   </section>
   <section class="card">
-    <h2>Last monitor probe</h2>
+    <h2>Heartbeat</h2>
     {% if last_monitor %}
     <dl>
-      <dt>Result</dt><dd data-f="monitor_ok">{{ "ok" if last_monitor.ok else "FAILED" }}</dd>
+      <dt>Last result</dt><dd data-f="monitor_ok">{{ "ok" if last_monitor.ok else "FAILED" }}</dd>
       <dt>Status / latency</dt><dd data-f="monitor_detail">{{ last_monitor.status_code or "—" }} / {{ "%.0f"|format(last_monitor.latency_ms or 0) }} ms</dd>
       <dt>Error</dt><dd data-f="monitor_error">{{ last_monitor.error or "—" }}</dd>
     </dl>
-    {% else %}<p data-f="monitor_none">No probes recorded yet.</p>{% endif %}
+    {% if monitor_cfg and monitor_cfg.enabled %}
+    <p class="muted">Sending every {{ monitor_cfg.interval_seconds }}s.</p>
+    {% endif %}
+    {% elif monitor_cfg and monitor_cfg.enabled %}
+    <p data-f="monitor_none">Enabled (every {{ monitor_cfg.interval_seconds }}s) — nothing sent yet.</p>
+    {% elif snap.active_profile %}
+    <p data-f="monitor_none">Not set up for this profile.
+      <a href="{{ url_for('profiles.edit_profile', name=snap.active_profile) }}">Add a heartbeat</a>
+      to ping your endpoint with SIM details on a schedule.</p>
+    {% else %}
+    <p data-f="monitor_none">No probes recorded yet.</p>
+    {% endif %}
   </section>
 </div>
 
 <section class="card">
   <h2>Actions</h2>
   <div class="actions">
-    <form method="post" action="{{ url_for('actions.reconnect') }}"><button type="submit">Reconnect</button></form>
-    <form method="post" action="{{ url_for('actions.reset_modem') }}"><button type="submit" class="danger">Reset modem</button></form>
-    <form method="post" action="{{ url_for('actions.monitor_now') }}"><button type="submit">Run monitor now</button></form>
-    <form method="post" action="{{ url_for('actions.fallback_test') }}" class="inline">
-      <label>Fallback test, seconds:
-        <input type="number" name="duration_seconds" min="10" placeholder="900" size="6">
-      </label>
-      <button type="submit" class="danger">Start fallback test</button>
+    <form method="post" action="{{ url_for('actions.reconnect') }}">
+      <button type="submit" title="Tear down the connection and re-apply the current profile">Reconnect</button>
+    </form>
+    <form method="post" action="{{ url_for('actions.reset_modem') }}">
+      <button type="submit" class="danger" title="Reboot the modem itself — it re-enumerates and reconnects (~1 min)">Reset modem</button>
+    </form>
+    <form method="post" action="{{ url_for('actions.monitor_now') }}">
+      <button type="submit" title="Send the profile's heartbeat request right now">Send heartbeat now</button>
     </form>
   </div>
+  <div class="actions" style="margin-top:10px">
+    <form method="post" action="{{ url_for('actions.fallback_test') }}" class="inline">
+      <button type="submit" class="danger">Start fallback test</button>
+      <label>for <input type="number" name="duration_seconds" min="10" placeholder="900" size="6"> seconds</label>
+    </form>
+  </div>
+  <p class="muted">Fallback test: turns the radio off for the duration (default 900s) so the
+    SIM's fallback applet can switch profiles, then reconnects and shows the new identity.</p>
 </section>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='app.js') }}"></script>{% endblock %}

@@ -3,9 +3,8 @@
 {% block content %}
 <h1>Diagnostics</h1>
 <p class="muted">
-  Runs AT commands over the daemon's dedicated serial port — safe while the service is
-  running; no need to stop anything or use minicom. Results land below within one
-  daemon tick (~5 s).
+  Talk to the modem directly — AT commands run over the app's own serial port, safely,
+  while everything keeps running. Results appear below within a few seconds.
 </p>
 
 <section class="card">
@@ -23,8 +22,8 @@
       placeholder="One AT command per line, e.g.&#10;AT+CEREG?&#10;AT+QNWINFO"></textarea>
     <div class="row"><button type="submit">Run commands</button></div>
   </form>
-  <p class="muted">Commands run exactly as typed (max 20). Mutating commands (CFUN,
-    QCFG writes, CRSM) are allowed — you own the device — but know what you're sending.</p>
+  <p class="muted">Commands run exactly as typed, one per line (max 20). Write commands
+    (CFUN, QCFG, CRSM…) are allowed — use with care.</p>
 </section>
 
 {% if snap.diagnostics %}

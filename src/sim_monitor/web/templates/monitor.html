@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Monitor — sim-monitor{% endblock %}
+{% block title %}Heartbeats — sim-monitor{% endblock %}
 {% block content %}
 <div class="row">
-  <h1>Monitor history</h1>
+  <h1>Heartbeat history</h1>
   <form method="post" action="{{ url_for('actions.monitor_now') }}" class="inline">
-    <button type="submit">Run probe now</button>
+    <button type="submit" title="Send the active profile's heartbeat request right now">Send heartbeat now</button>
   </form>
 </div>
 <table>
@@ -20,7 +20,8 @@
       <td class="break">{{ r.error or "" }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="6">No monitor results yet. Enable the monitor in the active profile, or run a probe now.</td></tr>
+    <tr><td colspan="6">No monitor results yet — set up a heartbeat in the active profile
+      (Profiles → Edit → <code>monitor:</code>), or send one now to test.</td></tr>
   {% endfor %}
   </tbody>
 </table>
