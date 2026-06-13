@@ -73,6 +73,10 @@ CREATE TABLE IF NOT EXISTS telemetry (
     earfcn INTEGER, tac TEXT, operator_numeric TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry(ts);
+CREATE TABLE IF NOT EXISTS sim_names (
+    iccid TEXT PRIMARY KEY,
+    name TEXT NOT NULL
+);
 """
 
 MAX_ROWS = 5000
@@ -259,6 +263,28 @@ class Database:
                 "SELECT * FROM telemetry ORDER BY ts DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ── per-SIM names (keyed by ICCID) ───────────────────────────────────
+    def get_sim_name(self, iccid: str | None) -> str | None:
+        if not iccid:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT name FROM sim_names WHERE iccid = ?", (iccid,)
+            ).fetchone()
+        return row["name"] if row else None
+
+    def set_sim_name(self, iccid: str, name: str) -> None:
+        with self._lock:
+            if name:
+                self._conn.execute(
+                    "INSERT INTO sim_names (iccid, name) VALUES (?, ?)"
+                    " ON CONFLICT(iccid) DO UPDATE SET name = excluded.name",
+                    (iccid, name),
+                )
+            else:  # empty name clears it
+                self._conn.execute("DELETE FROM sim_names WHERE iccid = ?", (iccid,))
+            self._conn.commit()
 
     def count_unread_sms(self) -> int:
         with self._lock:

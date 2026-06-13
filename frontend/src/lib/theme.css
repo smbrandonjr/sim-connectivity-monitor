@@ -113,8 +113,13 @@ code, .mono { font-family: var(--font-mono); }
 }
 .topbar .brand {
   font-family: var(--font-mono); font-weight: 700; letter-spacing: .04em;
-  margin-right: 14px; color: var(--color-text-primary);
+  margin-right: 14px; color: var(--color-text-primary); display: inline-flex;
+  align-items: center; gap: 6px;
 }
+.topbar .brand.editable { cursor: pointer; }
+.topbar .brand .edit-hint { opacity: 0; font-size: 12px; }
+.topbar .brand.editable:hover .edit-hint { opacity: .6; }
+.brand-edit { width: 200px; margin-right: 14px; font-weight: 700; }
 .nav-tab {
   padding: 8px 12px; font-size: var(--fs-md); color: var(--color-text-muted);
   background: transparent; border: 0; border-bottom: 2px solid transparent;

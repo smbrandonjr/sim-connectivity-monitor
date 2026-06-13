@@ -160,6 +160,8 @@ def command(name: str):
                 command_obj = cmd.ClearSms()
             case "refresh-sms":
                 command_obj = cmd.RefreshSms()
+            case "set-sim-name":
+                command_obj = cmd.SetSimName(name=str(body.get("name", "")))
             case "update-app":
                 return _trigger_update(app)
             case _:

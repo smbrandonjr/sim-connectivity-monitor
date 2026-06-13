@@ -198,6 +198,8 @@ class Daemon:
                 self._clear_sms()
             case cmd.RefreshSms():
                 self._sms_pending = True
+            case cmd.SetSimName(name=name):
+                self._set_sim_name(name)
             case cmd.ReloadProfiles():
                 self._reload_profiles()
 
@@ -354,6 +356,20 @@ class Daemon:
             "ota", f"network context {when}: " + (", ".join(parts) or "unavailable")
         )
 
+    def _set_sim_name(self, name: str) -> None:
+        iccid = self.store.get().iccid
+        if not iccid:
+            self.events.warning("sim", "cannot name SIM: no SIM present")
+            return
+        self.db.set_sim_name(iccid, name.strip())
+        self.store.update(sim_name=name.strip() or None)
+        self.events.info("sim", f"SIM {iccid} named {name.strip()!r}" if name.strip()
+                         else f"cleared name for SIM {iccid}")
+
+    def _refresh_sim_name(self) -> None:
+        """Resolve the stored name for the current ICCID into the snapshot."""
+        self.store.update(sim_name=self.db.get_sim_name(self.store.get().iccid))
+
     def _record_identity(self, reason: str) -> None:
         snap = self.store.get()
         key = (snap.iccid, snap.imsi, snap.imei)
@@ -387,6 +403,7 @@ class Daemon:
             self.store.update(sim_present=False, iccid=None, imsi=None, last_error=sim.detail)
             return  # keep polling: SIM may be inserted any moment
         self.store.update(sim_present=True, iccid=sim.iccid, imsi=sim.imsi)
+        self._refresh_sim_name()
         self._record_identity("sim-ready")
         self._sms_pending = True  # sync the inbox once the SIM is up
         self.events.info("sim", f"SIM ready, ICCID {sim.iccid}")
@@ -535,7 +552,7 @@ class Daemon:
             self._sim_refresh_pending = False
             self._go(
                 S.MODEM_FOUND,
-                sim_present=False, iccid=None, imsi=None,
+                sim_present=False, iccid=None, imsi=None, sim_name=None,
                 interface=None, ip_address=None, active_profile=None,
             )
             return
@@ -563,6 +580,7 @@ class Daemon:
             self._safe_disconnect()
             self.active_profile = None
             self.store.update(iccid=sim.iccid, imsi=sim.imsi)
+            self._refresh_sim_name()
             self._record_identity("ota-swap")
             self._go(
                 S.SIM_READY,
@@ -787,7 +805,7 @@ class Daemon:
         self._fallback_active = False
         self._go(
             S.NO_MODEM,
-            sim_present=False, iccid=None, imsi=None,
+            sim_present=False, iccid=None, imsi=None, sim_name=None,
             interface=None, ip_address=None, active_profile=None,
             vendor=None, model=None, imei=None,
         )

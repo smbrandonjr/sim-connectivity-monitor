@@ -81,6 +81,7 @@ class Snapshot:
     sim_present: bool = False
     iccid: str | None = None
     imsi: str | None = None
+    sim_name: str | None = None  # user label for the current SIM (by ICCID)
     operator: str | None = None
     registration: str | None = None
     signal_rssi: int | None = None

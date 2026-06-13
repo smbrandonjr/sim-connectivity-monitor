@@ -11,7 +11,6 @@
   import Telemetry from "./views/Telemetry.svelte";
   import Timeline from "./views/Timeline.svelte";
   import Diagnostics from "./views/Diagnostics.svelte";
-  import Events from "./views/Events.svelte";
 
   const TABS = [
     { id: "dashboard", label: "Dashboard", icon: "dashboard-line", view: Dashboard },
@@ -20,11 +19,21 @@
     { id: "telemetry", label: "Telemetry", icon: "line-chart-line", view: Telemetry },
     { id: "timeline", label: "Timeline", icon: "time-line", view: Timeline },
     { id: "diagnostics", label: "Diagnostics", icon: "terminal-box-line", view: Diagnostics },
-    { id: "events", label: "Events", icon: "file-list-line", view: Events },
   ];
 
   let route = "dashboard";
   let theme = currentTheme();
+  let editingName = false;
+  let nameInput = "";
+
+  function startEditName() {
+    nameInput = $status?.sim_name ?? "";
+    editingName = true;
+  }
+  async function saveName() {
+    editingName = false;
+    await api.cmd("set-sim-name", { name: nameInput.trim() });
+  }
 
   function applyHash() {
     const id = location.hash.replace(/^#\/?/, "") || "dashboard";
@@ -60,7 +69,24 @@
 <Toasts />
 
 <nav class="topbar">
-  <span class="brand">sim-monitor</span>
+  {#if editingName}
+    <input
+      class="ui-input brand-edit"
+      bind:value={nameInput}
+      placeholder="name this SIM"
+      autofocus
+      on:blur={saveName}
+      on:keydown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") (editingName = false); }}
+    />
+  {:else}
+    <span class="brand" title={$status?.sim_present ? "click to name this SIM" : "sim-monitor"}
+          class:editable={$status?.sim_present}
+          on:click={() => $status?.sim_present && startEditName()}
+          role="button" tabindex="0">
+      {$status?.sim_name || "sim-monitor"}
+      {#if $status?.sim_present}<i class="ri-pencil-line edit-hint"></i>{/if}
+    </span>
+  {/if}
   {#each TABS as t}
     <button class="nav-tab" class:active={route === t.id} on:click={() => go(t.id)}>
       <i class="ri-{t.icon}"></i>{t.label}

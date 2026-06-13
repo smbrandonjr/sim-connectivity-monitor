@@ -384,6 +384,28 @@ class TestSmsFlow:
         assert harness.driver.list_sms() == []
         assert not [r for r in harness.db.recent_sms() if r["direction"] == "in"]
 
+    def test_set_and_persist_sim_name(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.queue.put(cmd.SetSimName(name="Warehouse Pi"))
+        harness.tick()
+        assert harness.store.get().sim_name == "Warehouse Pi"
+        assert harness.db.get_sim_name(DEFAULT_ICCID) == "Warehouse Pi"
+
+    def test_sim_name_resolves_on_swap(self, tmp_path):
+        h = Harness(tmp_path, profiles=[
+            Profile.model_validate({
+                "name": "any", "match": {"iccid_patterns": ["*"], "priority": 1000},
+                "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}],
+            })
+        ])
+        h.run_until(State.CONNECTED)
+        # Name the second SIM ahead of time, then OTA-swap to it.
+        h.db.set_sim_name("8946420000000000777", "Backup SIM")
+        h.driver.ota_swap("8946420000000000777")
+        h.tick()
+        h.run_until(State.CONNECTED)
+        assert h.store.get().sim_name == "Backup SIM"
+
     def test_clear_all_sms(self, harness):
         harness.run_until(State.CONNECTED)
         harness.driver.receive_sms("+1", "a")

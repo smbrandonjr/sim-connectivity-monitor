@@ -82,6 +82,11 @@ class RefreshSms:
 
 
 @dataclass(frozen=True)
+class SetSimName:
+    name: str
+
+
+@dataclass(frozen=True)
 class ReloadProfiles:
     pass
 
@@ -101,6 +106,7 @@ Command = (
     | DeleteSms
     | ClearSms
     | RefreshSms
+    | SetSimName
     | ReloadProfiles
 )
 

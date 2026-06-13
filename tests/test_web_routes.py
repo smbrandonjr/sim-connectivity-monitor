@@ -166,6 +166,16 @@ class TestJsonCommandApi:
         assert cmd.PauseMonitor() in drained
         assert cmd.ResumeMonitor() in drained
 
+    def test_set_sim_name(self, sim, client):
+        client.post("/api/cmd/set-sim-name", json={"name": "Lab Pi"})
+        assert cmd.SetSimName(name="Lab Pi") in sim.commands.drain()
+
+    def test_sim_name_in_status(self, sim, client):
+        tick_until_connected(sim)
+        sim.commands.put(cmd.SetSimName(name="Roof Unit"))
+        sim.daemon.tick()
+        assert client.get("/api/status.json").get_json()["sim_name"] == "Roof Unit"
+
     def test_unknown_command_404(self, sim, client):
         assert client.post("/api/cmd/nope").status_code == 404
 
