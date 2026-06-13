@@ -1,14 +1,27 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { status } from "../lib/stores";
   import { api } from "../lib/api";
-  import { toast } from "../lib/toast";
   import Copyable from "../lib/Copyable.svelte";
+  import Sparkline from "../lib/Sparkline.svelte";
 
-  let fallbackSeconds = 900;
+  let history: any[] = [];
+  const SERIES = [
+    { key: "rsrp", label: "RSRP", unit: "dBm" },
+    { key: "rsrq", label: "RSRQ", unit: "dB" },
+    { key: "sinr", label: "SINR", unit: "dB" },
+    { key: "rssi", label: "RSSI", unit: "dBm" },
+  ];
 
-  async function cmd(name: string, body?: Record<string, unknown>, ok?: string) {
-    if (await api.cmd(name, body)) toast(ok ?? "requested", "ok");
+  async function loadTelemetry() {
+    history = (await api.telemetry()).history ?? [];
   }
+
+  onMount(() => {
+    loadTelemetry();
+    const t = setInterval(loadTelemetry, 5000);
+    return () => clearInterval(t);
+  });
 
   $: s = $status;
   $: t = s?.telemetry ?? {};
@@ -23,7 +36,6 @@
   {#if fb?.active}
     <div class="ui-card alert">
       <strong>Fallback test in progress</strong> — radio off until the SIM applet switches profiles.
-      <button class="ui-btn ui-btn-sm ui-btn-danger" on:click={() => cmd("fallback-abort", {}, "aborting")}>Abort</button>
     </div>
   {/if}
 
@@ -55,38 +67,30 @@
       <dl>
         <dt>Interface</dt><dd>{s.interface ?? "—"}</dd>
         <dt>IP address</dt><dd><Copyable value={s.ip_address} /></dd>
+        <dt>APN</dt><dd>{s.apn ?? "—"}</dd>
         <dt>Default route</dt><dd>{s.routing_ok == null ? "—" : s.routing_ok ? "cellular" : "not cellular"}</dd>
-        <dt>RSRP / SINR</dt><dd>{t.rsrp ?? "—"} / {t.sinr ?? "—"}</dd>
         <dt>Last error</dt><dd style="color:var(--status-red)">{s.last_error ?? "—"}</dd>
       </dl>
     </section>
 
     <section class="ui-card">
-      <h2>Heartbeat</h2>
+      <h2>Serving cell</h2>
       <dl>
-        <dt>Scheduled</dt><dd>{s.monitor_paused ? "paused" : "running"}</dd>
-        <dt>Unread SMS</dt><dd>{s.sms_unread ?? 0}</dd>
+        <dt>RAT / band</dt><dd>{t.rat ?? "—"} {t.band ? `· B${t.band}` : ""}</dd>
+        <dt>Operator (MCC/MNC)</dt><dd>{t.operator_numeric ?? "—"}</dd>
+        <dt>Cell ID / PCI</dt><dd>{t.cell_id ?? "—"} / {t.pci ?? "—"}</dd>
+        <dt>EARFCN / TAC</dt><dd>{t.earfcn ?? "—"} / {t.tac ?? "—"}</dd>
       </dl>
     </section>
   </div>
 
-  <section class="ui-card">
-    <h2>Actions</h2>
-    <div class="row">
-      <button class="ui-btn" on:click={() => cmd("reconnect", {}, "reconnecting")}>Reconnect</button>
-      <button class="ui-btn ui-btn-danger" on:click={() => cmd("reset-modem", {}, "resetting modem")}>Reset modem</button>
-      <button class="ui-btn" on:click={() => cmd("monitor-now", {}, "sending heartbeat")}>Send heartbeat</button>
-      {#if s.monitor_paused}
-        <button class="ui-btn" on:click={() => cmd("monitor-resume", {}, "resumed")}>Resume heartbeats</button>
-      {:else}
-        <button class="ui-btn" on:click={() => cmd("monitor-pause", {}, "paused")}>Pause heartbeats</button>
-      {/if}
-    </div>
-    <div class="row" style="margin-top:10px">
-      <button class="ui-btn ui-btn-danger" on:click={() => cmd("fallback-test", { duration_seconds: fallbackSeconds }, "fallback test started")}>
-        Start fallback test
-      </button>
-      <label class="muted">for <input class="ui-input" style="width:80px;display:inline-block" type="number" bind:value={fallbackSeconds} /> s</label>
-    </div>
-  </section>
+  <div class="cards">
+    {#each SERIES as c}
+      <section class="ui-card">
+        <h2>{c.label}</h2>
+        <div class="metric-now">{t[c.key] ?? "—"} <span class="muted">{c.unit}</span></div>
+        <Sparkline values={history.map((r) => r[c.key])} />
+      </section>
+    {/each}
+  </div>
 {/if}

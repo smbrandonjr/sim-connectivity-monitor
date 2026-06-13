@@ -365,6 +365,31 @@ class TestSmsFlow:
         assert any(r["body"] == "hello from the field" for r in rows)
         assert harness.store.get().sms_unread >= 1
 
+    def test_unread_count_and_read_state_survives_resync(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.driver.receive_sms("+12025550123", "hello")
+        harness.tick()
+        assert harness.store.get().sms_unread == 1
+        # Mark read, then force a re-sync of the same message: it stays read.
+        harness.queue.put(cmd.MarkSmsRead())
+        harness.tick()
+        assert harness.store.get().sms_unread == 0
+        harness.queue.put(cmd.RefreshSms())
+        harness.tick()
+        assert harness.store.get().sms_unread == 0  # not re-marked unread
+        rows = [r for r in harness.db.recent_sms() if r["direction"] == "in"]
+        assert len(rows) == 1  # not duplicated on resync
+
+    def test_new_sms_increments_unread_again(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.driver.receive_sms("+1", "a")
+        harness.tick()
+        harness.queue.put(cmd.MarkSmsRead())
+        harness.tick()
+        harness.driver.receive_sms("+2", "b")  # a genuinely new one
+        harness.tick()
+        assert harness.store.get().sms_unread == 1
+
     def test_send_sms_command(self, harness):
         harness.run_until(State.CONNECTED)
         harness.queue.put(cmd.SendSms(number="+12025550123", text="ping"))

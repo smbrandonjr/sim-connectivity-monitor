@@ -8,7 +8,6 @@
   import Dashboard from "./views/Dashboard.svelte";
   import Profiles from "./views/Profiles.svelte";
   import Messages from "./views/Messages.svelte";
-  import Telemetry from "./views/Telemetry.svelte";
   import Timeline from "./views/Timeline.svelte";
   import Diagnostics from "./views/Diagnostics.svelte";
   import Monitoring from "./views/Monitoring.svelte";
@@ -18,7 +17,6 @@
     { id: "profiles", label: "Profiles", icon: "settings-3-line", view: Profiles },
     { id: "messages", label: "Messages", icon: "message-2-line", view: Messages },
     { id: "monitoring", label: "Monitoring", icon: "heart-pulse-line", view: Monitoring },
-    { id: "telemetry", label: "Telemetry", icon: "line-chart-line", view: Telemetry },
     { id: "timeline", label: "Timeline", icon: "time-line", view: Timeline },
     { id: "diagnostics", label: "Diagnostics", icon: "terminal-box-line", view: Diagnostics },
   ];
@@ -65,6 +63,16 @@
 
   $: current = TABS.find((t) => t.id === route) ?? TABS[0];
   $: smsCount = $status?.sms_unread ?? 0;
+
+  // Surface new SMS from anywhere with a toast (the nav badge shows the count).
+  let prevUnread = -1;
+  $: {
+    const u = $status?.sms_unread ?? 0;
+    if (prevUnread >= 0 && u > prevUnread) {
+      toast(`${u - prevUnread} new SMS — see Messages`, "info");
+    }
+    prevUnread = u;
+  }
 </script>
 
 <div class="app-bg"></div>

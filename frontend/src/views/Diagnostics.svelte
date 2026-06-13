@@ -1,33 +1,47 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { status } from "../lib/stores";
   import { api } from "../lib/api";
   import { toast } from "../lib/toast";
   import { ts } from "../lib/format";
 
   let commands = "";
+  let fallbackSeconds = 900;
 
-  const REFERENCE = [
-    { group: "Forbidden network list (FPLMN)", items: [
-      { cmd: "AT+CRSM=176,28539,0,0,12", desc: "Read the SIM's blacklist of rejected networks (FFFFFF = empty slot)." },
-      { cmd: 'AT+CRSM=214,28539,0,0,12,"FFFFFFFFFFFFFFFFFFFFFFFF"\nAT+CFUN=1,1', desc: "Clear the blacklist then reboot the modem to rescan." },
+  // Full AT reference (function + sample response), click any to queue it.
+  const REFERENCE: { group: string; rows: { cmd: string; fn: string; sample: string }[] }[] = [
+    { group: "Identity & SIM", rows: [
+      { cmd: "AT", fn: "Attention; verifies command path", sample: "OK" },
+      { cmd: "ATI", fn: "Module number", sample: "EC25EFAR06A11M4G" },
+      { cmd: "AT+CGMI", fn: "Manufacturer identity", sample: "Quectel" },
+      { cmd: "AT+CGMM", fn: "Model identity", sample: "EC25" },
+      { cmd: "AT+CPIN?", fn: "SIM PIN state (Hologram needs none)", sample: "+CPIN: READY" },
+      { cmd: "AT+CCID", fn: "SIM ICCID (profile identifier)", sample: "+CCID: 891234…" },
+      { cmd: "AT+CFUN?", fn: "Module functionality", sample: "+CFUN: 1,0" },
     ]},
-    { group: "Network selection", items: [
-      { cmd: "AT+COPS?", desc: "Current operator and selection mode (0 auto / 1 manual)." },
-      { cmd: "AT+COPS=?", desc: "Scan visible networks — takes 1–2 min, run alone. 1=available 2=current 3=forbidden." },
-      { cmd: 'AT+COPS=1,2,"310260"', desc: "Force a network by PLMN (310260 T-Mobile, 310410 AT&T, 311480 Verizon). Persists!" },
-      { cmd: "AT+COPS=0", desc: "Back to automatic network selection." },
+    { group: "Signal & registration", rows: [
+      { cmd: "AT+CSQ", fn: "Signal quality", sample: "+CSQ: 22,4" },
+      { cmd: "AT+CREG?", fn: "GSM/SMS registration", sample: "+CREG: 0,5" },
+      { cmd: "AT+CGREG?", fn: "3G registration", sample: "+CGREG: 0,5" },
+      { cmd: "AT+CEREG?", fn: "LTE/EPS registration", sample: '+CEREG: 2,5,"MI9S","25SS404",8' },
+      { cmd: "AT+QNWINFO", fn: "Serving network / band (Quectel)", sample: '+QNWINFO: "FDD LTE","310410","LTE BAND 2",2150' },
     ]},
-    { group: "Quick status", items: [
-      { cmd: "AT+CSQ", desc: "Signal (0–31; 99 = no signal). dBm ≈ −113 + 2n." },
-      { cmd: "AT+CEREG?", desc: "LTE registration (1 home, 5 roaming, 2 searching, 3 denied)." },
-      { cmd: "AT+QNWINFO", desc: "Serving network / band (Quectel)." },
+    { group: "Data context", rows: [
+      { cmd: "AT+CGDCONT?", fn: "PDP context parameters (APN)", sample: '+CGDCONT: 1,"IP","hologram","0.0.0.0",0,0' },
+      { cmd: "AT+CGACT?", fn: "PDP context activation", sample: "+CGACT: 1,1" },
+    ]},
+    { group: "Network selection", rows: [
+      { cmd: "AT+COPS?", fn: "Operator selection status", sample: '+COPS: 1,2,"310260",2' },
+      { cmd: "AT+COPS=?", fn: "Networks in reach (scan, 1–2 min)", sample: '+COPS: (1,"AT&T","AT&T","310410",2)' },
+      { cmd: 'AT+COPS=1,2,"310260"', fn: "Force a network by PLMN (persists!)", sample: "OK" },
+      { cmd: "AT+COPS=0", fn: "Back to automatic selection", sample: "OK" },
+    ]},
+    { group: "Forbidden networks (FPLMN)", rows: [
+      { cmd: "AT+CRSM=176,28539,0,0,12", fn: "Read FPLMN (FFFF… = empty)", sample: '+CRSM: 144,0,"FFFFFFFFFFFFFFFFFFFFFFFF"' },
+      { cmd: 'AT+CRSM=214,28539,0,0,12,"FFFFFFFFFFFFFFFFFFFFFFFF"\nAT+CFUN=1,1', fn: "Clear FPLMN + reboot modem", sample: "+CRSM: 144,0" },
     ]},
   ];
 
-  function add(cmd: string) {
-    commands = commands ? `${commands}\n${cmd}` : cmd;
-  }
+  function add(cmd: string) { commands = commands ? `${commands}\n${cmd}` : cmd; }
 
   async function runStandard() {
     if (await api.cmd("run-diagnostics", { commands: [] })) toast("diagnostics queued", "ok");
@@ -37,23 +51,47 @@
     if (await api.cmd("run-diagnostics", { commands: list })) toast("diagnostics queued", "ok");
   }
 
+  async function act(name: string, body: any, msg: string) {
+    if (await api.cmd(name, body)) toast(msg, "ok");
+  }
+
   $: report = $status?.diagnostics;
+  $: paused = $status?.monitor_paused;
 </script>
 
 <h1>Diagnostics</h1>
-<p class="muted">Run AT commands over the app's serial port — safe while everything is running.
-  Results appear below within a few seconds.</p>
 
 <section class="ui-card">
+  <h2>Actions</h2>
   <div class="row">
-    <button class="ui-btn ui-btn-primary" on:click={runStandard}>Run standard diagnostics</button>
-    <span class="muted">signal, registration, operator, PDP contexts + vendor checks</span>
+    <button class="ui-btn" on:click={() => act("reconnect", {}, "reconnecting")}>Reconnect</button>
+    <button class="ui-btn ui-btn-danger" on:click={() => act("reset-modem", {}, "resetting modem")}>Reset modem</button>
+    <button class="ui-btn" on:click={() => act("monitor-now", {}, "heartbeat sent")}>Send heartbeat</button>
+    {#if paused}
+      <button class="ui-btn" on:click={() => act("monitor-resume", {}, "resumed")}>Resume heartbeats</button>
+    {:else}
+      <button class="ui-btn" on:click={() => act("monitor-pause", {}, "paused")}>Pause heartbeats</button>
+    {/if}
+  </div>
+  <div class="row" style="margin-top:10px">
+    {#if $status?.fallback?.active}
+      <button class="ui-btn ui-btn-danger" on:click={() => act("fallback-abort", {}, "aborting fallback test")}>Abort fallback test</button>
+    {:else}
+      <button class="ui-btn ui-btn-danger" on:click={() => act("fallback-test", { duration_seconds: fallbackSeconds }, "fallback test started")}>Start fallback test</button>
+      <label class="muted">for <input class="ui-input" style="width:80px;display:inline-block" type="number" bind:value={fallbackSeconds} /> s</label>
+    {/if}
   </div>
 </section>
 
 <section class="ui-card">
-  <h2>Custom AT commands</h2>
-  <textarea class="ui-textarea" rows="5" placeholder="One AT command per line" bind:value={commands}></textarea>
+  <h2>AT console</h2>
+  <p class="muted">Runs over the app's serial port — safe while everything is running. Results
+    appear below within a few seconds.</p>
+  <div class="row">
+    <button class="ui-btn ui-btn-primary" on:click={runStandard}>Run standard diagnostics</button>
+    <span class="muted">the full sweep: identity, SIM, signal, registration, PDP, operator</span>
+  </div>
+  <textarea class="ui-textarea" rows="5" style="margin-top:10px" placeholder="One AT command per line" bind:value={commands}></textarea>
   <div class="row" style="margin-top:8px"><button class="ui-btn" on:click={runCustom}>Run</button></div>
 </section>
 
@@ -70,15 +108,17 @@
 
 <section class="ui-card">
   <h2>Command reference</h2>
-  <p class="muted">Click a command to add it to the box above.</p>
+  <p class="muted">Click a command to add it to the console above.</p>
   {#each REFERENCE as g}
     <h3 style="font-size:var(--fs-sm);margin:12px 0 4px;color:var(--color-text-muted)">{g.group}</h3>
     <table>
+      <thead><tr><th>Command</th><th>Function</th><th>Sample response</th></tr></thead>
       <tbody>
-        {#each g.items as it}
+        {#each g.rows as r}
           <tr>
-            <td class="nowrap"><a href={"#"} on:click|preventDefault={() => add(it.cmd)}><code>{it.cmd.split("\n")[0]}{it.cmd.includes("\n") ? " …" : ""}</code></a></td>
-            <td class="muted">{it.desc}</td>
+            <td class="nowrap"><a href={"#"} on:click|preventDefault={() => add(r.cmd)}><code>{r.cmd.split("\n")[0]}{r.cmd.includes("\n") ? " …" : ""}</code></a></td>
+            <td class="muted">{r.fn}</td>
+            <td class="mono break">{r.sample}</td>
           </tr>
         {/each}
       </tbody>

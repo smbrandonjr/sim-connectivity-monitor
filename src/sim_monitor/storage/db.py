@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS sms (
     status TEXT,                     -- 'unread' | 'read' | 'sent'
     modem_indices TEXT,              -- JSON list of modem storage indices (inbound)
     parts INTEGER DEFAULT 1,
-    raw_pdu TEXT
+    raw_pdu TEXT,
+    dedup TEXT                       -- stable content key (inbound): peer|ts|body
 );
 CREATE INDEX IF NOT EXISTS idx_sms_ts ON sms(ts);
 CREATE TABLE IF NOT EXISTS telemetry (
@@ -97,7 +98,14 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a DB was first created (caller holds lock)."""
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(sms)")}
+        if "dedup" not in cols:
+            self._conn.execute("ALTER TABLE sms ADD COLUMN dedup TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -199,20 +207,51 @@ class Database:
         return [dict(r) for r in rows]
 
     # ── SMS ──────────────────────────────────────────────────────────────
-    def replace_inbound_sms(self, rows: list[dict[str, Any]]) -> None:
-        """Replace the inbound message set with the modem's current contents."""
+    def upsert_inbound_sms(self, rows: list[dict[str, Any]]) -> int:
+        """Sync the inbound set to the modem's current contents, preserving our
+        app-managed read state across refreshes (keyed by a stable `dedup`).
+        New messages are inserted as 'unread'. Returns the count of NEW messages."""
         with self._lock:
-            self._conn.execute("DELETE FROM sms WHERE direction = 'in'")
-            for r in rows:
+            current = [r["dedup"] for r in rows]
+            if current:
+                marks = ",".join("?" * len(current))
                 self._conn.execute(
-                    "INSERT INTO sms (ts, direction, peer, body, encoding, status,"
-                    " modem_indices, parts, raw_pdu)"
-                    " VALUES (?, 'in', ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        r["ts"], r["peer"], r["body"], r["encoding"], r["status"],
-                        json.dumps(r["modem_indices"]), r.get("parts", 1), r.get("raw_pdu"),
-                    ),
+                    f"DELETE FROM sms WHERE direction='in' AND (dedup IS NULL OR "  # noqa: S608
+                    f"dedup NOT IN ({marks}))",
+                    current,
                 )
+            else:
+                self._conn.execute("DELETE FROM sms WHERE direction='in'")
+            new_count = 0
+            for r in rows:
+                existing = self._conn.execute(
+                    "SELECT id FROM sms WHERE direction='in' AND dedup=?", (r["dedup"],)
+                ).fetchone()
+                if existing:
+                    self._conn.execute(
+                        "UPDATE sms SET modem_indices=?, parts=? WHERE id=?",
+                        (json.dumps(r["modem_indices"]), r.get("parts", 1), existing["id"]),
+                    )
+                else:
+                    new_count += 1
+                    self._conn.execute(
+                        "INSERT INTO sms (ts, direction, peer, body, encoding, status,"
+                        " modem_indices, parts, raw_pdu, dedup)"
+                        " VALUES (?, 'in', ?, ?, ?, 'unread', ?, ?, ?, ?)",
+                        (
+                            r["ts"], r["peer"], r["body"], r["encoding"],
+                            json.dumps(r["modem_indices"]), r.get("parts", 1),
+                            r.get("raw_pdu"), r["dedup"],
+                        ),
+                    )
+            self._conn.commit()
+        return new_count
+
+    def mark_inbound_read(self) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE sms SET status='read' WHERE direction='in' AND status='unread'"
+            )
             self._conn.commit()
 
     def add_sent_sms(self, peer: str, body: str, parts: int = 1) -> None:

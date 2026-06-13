@@ -7,6 +7,7 @@ for storage/display. No I/O.
 
 from __future__ import annotations
 
+import hashlib
 import time
 
 from sim_monitor.modem import pdu
@@ -45,8 +46,13 @@ def reassemble_inbound(raw_list: list[RawSms]) -> list[dict]:
 
 
 def _row(indices: list[int], status: int, decoded: pdu.DecodedSms, body: str, parts: int) -> dict:
+    ts = _ts_to_epoch(decoded.timestamp)
+    # Stable identity so read-state survives the modem's index reuse / refresh.
+    dedup = hashlib.sha1(
+        f"{decoded.sender}|{int(ts)}|{body}".encode(errors="replace")
+    ).hexdigest()
     return {
-        "ts": _ts_to_epoch(decoded.timestamp),
+        "ts": ts,
         "peer": decoded.sender,
         "body": body,
         "encoding": decoded.encoding,
@@ -54,6 +60,7 @@ def _row(indices: list[int], status: int, decoded: pdu.DecodedSms, body: str, pa
         "modem_indices": indices,
         "parts": parts,
         "raw_pdu": None,
+        "dedup": dedup,
     }
 
 

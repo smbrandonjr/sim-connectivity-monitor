@@ -82,6 +82,11 @@ class RefreshSms:
 
 
 @dataclass(frozen=True)
+class MarkSmsRead:
+    pass
+
+
+@dataclass(frozen=True)
 class SetSimName:
     name: str
 
@@ -111,6 +116,7 @@ Command = (
     | DeleteSms
     | ClearSms
     | RefreshSms
+    | MarkSmsRead
     | SetSimName
     | ReloadMonitorConfig
     | ReloadProfiles

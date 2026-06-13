@@ -63,15 +63,26 @@ class ModemDriver(ABC):
 
     name: str = "base"
 
-    # Read-only commands for the web UI's Diagnostics page; vendor drivers
-    # extend with their quirk queries.
+    # Standard read-only sweep for the web UI's Diagnostics page (each bounded
+    # by a short timeout). The slow network scan (AT+COPS=?) is intentionally
+    # excluded here; it's available as a one-click reference command instead.
+    # Vendor drivers extend this with their quirk queries.
     DIAGNOSTIC_COMMANDS: list[str] = [
-        "AT+CSQ",
-        "AT+CREG?",
-        "AT+CEREG?",
-        "AT+COPS?",
-        "AT+CPIN?",
-        "AT+CGDCONT?",
+        "AT",            # command path
+        "ATI",           # module identity
+        "AT+CGMI",       # manufacturer
+        "AT+CGMM",       # model
+        "AT+CGMR",       # firmware
+        "AT+CPIN?",      # SIM PIN state
+        "AT+CCID",       # ICCID
+        "AT+CFUN?",      # functionality level
+        "AT+CSQ",        # signal quality
+        "AT+CREG?",      # GSM registration
+        "AT+CGREG?",     # 3G registration
+        "AT+CEREG?",     # LTE/EPS registration
+        "AT+COPS?",      # operator selection
+        "AT+CGDCONT?",   # PDP context params (APN)
+        "AT+CGACT?",     # PDP context activation
     ]
 
     @abstractmethod

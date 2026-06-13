@@ -42,6 +42,7 @@
 
   onMount(() => {
     load();
+    api.cmd("mark-sms-read");  // viewing the inbox clears the unread badge
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   });

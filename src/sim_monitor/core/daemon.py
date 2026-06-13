@@ -91,6 +91,7 @@ class Daemon:
         self._variant_index = 0             # which PDP-context variant we're trying
         self._fallback_active = False       # on the built-in last-ditch default
         self._next_telemetry = 0.0          # monotonic time of next telemetry poll
+        self._next_sms_poll = 0.0           # monotonic time of next SMS backstop poll
         self.global_monitor: MonitorConfig | None = None
         self._load_global_monitor()
 
@@ -221,6 +222,9 @@ class Daemon:
                 self._clear_sms()
             case cmd.RefreshSms():
                 self._sms_pending = True
+            case cmd.MarkSmsRead():
+                self.db.mark_inbound_read()
+                self.store.update(sms_unread=self.db.count_unread_sms())
             case cmd.SetSimName(name=name):
                 self._set_sim_name(name)
             case cmd.ReloadMonitorConfig():
@@ -304,9 +308,17 @@ class Daemon:
     # ------------------------------------------------------------------ SMS
 
     _SMS_SAFE_STATES = (S.CONNECTED, S.MODEM_FOUND, S.SIM_READY, S.DEGRADED)
+    SMS_POLL_SECONDS = 60  # backstop poll in case the +CMTI URC isn't captured
 
     def _maybe_fetch_sms(self) -> None:
-        if not (self._sms_pending and self.driver and self.state in self._SMS_SAFE_STATES):
+        if self.driver is None or self.state not in self._SMS_SAFE_STATES:
+            return
+        # Periodic backstop: new SMS surface even if the +CMTI URC went to a
+        # port we don't own.
+        if self.clock() >= self._next_sms_poll:
+            self._sms_pending = True
+            self._next_sms_poll = self.clock() + self.SMS_POLL_SECONDS
+        if not self._sms_pending:
             return
         self._sms_pending = False
         try:
@@ -316,11 +328,10 @@ class Daemon:
             return
         from sim_monitor.modem.sms import reassemble_inbound
 
-        rows = reassemble_inbound(raw)
-        self.db.replace_inbound_sms(rows)
+        new_count = self.db.upsert_inbound_sms(reassemble_inbound(raw))
         self.store.update(sms_unread=self.db.count_unread_sms())
-        if rows:
-            self.events.info("sms", f"inbox synced: {len(rows)} message(s)")
+        if new_count:
+            self.events.info("sms", f"{new_count} new message(s) received")
 
     def _send_sms(self, number: str, text: str) -> None:
         if self.driver is None:
