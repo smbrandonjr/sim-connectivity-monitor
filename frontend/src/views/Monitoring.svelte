@@ -86,13 +86,14 @@
   }
   function isCustom(f: { path: string }) { return !CATALOG.some((c) => c.path === f.path); }
 
-  // Live preview mirroring the server's render_body_fields (omit unknowns, keep types).
-  function buildPreviewObj() {
+  // Live preview mirroring the server's render_body_fields (omit unknowns, keep
+  // types). Passed fields/ph explicitly so Svelte re-runs it on every change.
+  function buildPreview(flds: typeof fields, ph: Record<string, any>) {
     const out: any = {};
-    for (const f of fields) {
+    for (const f of flds) {
       let v: any;
       if (f.kind === "placeholder") {
-        v = phValues[f.value];
+        v = ph[f.value];
         if (v === null || v === undefined) continue;
       } else v = f.value;
       const parts = f.path.split(".");
@@ -102,7 +103,10 @@
     }
     return out;
   }
-  $: preview = JSON.stringify(buildPreviewObj(), null, 2);
+
+  // Reactive derived state — these recompute whenever `fields`/`phValues` change.
+  $: selectedPaths = new Set(fields.map((f) => f.path));
+  $: preview = JSON.stringify(buildPreview(fields, phValues), null, 2);
 
   async function load() {
     const c = await api.monitorConfig();
@@ -227,9 +231,9 @@
       <h3 style="font-size:var(--fs-sm);margin:12px 0 4px;color:var(--color-text-muted)">{g === "Top level" ? "Top level" : g + ".*"}</h3>
       <div class="chips">
         {#each CATALOG.filter((c) => c.group === g) as item}
-          <button class="chip" class:on={selected(item.path)} on:click={() => toggle(item)}
+          <button class="chip" class:on={selectedPaths.has(item.path)} on:click={() => toggle(item)}
                   title={"= {" + item.value + "} → " + (phValues[item.value] ?? "—")}>
-            {selected(item.path) ? "✓ " : "+ "}{item.label}
+            {selectedPaths.has(item.path) ? "✓ " : "+ "}{item.label}
           </button>
         {/each}
       </div>
