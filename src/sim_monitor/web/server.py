@@ -21,9 +21,10 @@ def create_app(sim_app) -> Flask:
     flask_app.secret_key = os.urandom(24)
     flask_app.config["SIM"] = sim_app
 
-    from sim_monitor.web.routes import api, spa
+    from sim_monitor.web.routes import api, scan, spa
 
     flask_app.register_blueprint(api.bp)
+    flask_app.register_blueprint(scan.bp)
     flask_app.register_blueprint(spa.bp)
     return flask_app
 

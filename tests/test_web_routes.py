@@ -134,6 +134,47 @@ class TestSmsApi:
         assert any(m["body"] == "field test message" for m in data)
 
 
+class TestScanApi:
+    def _wait_done(self, client, timeout=3.0):
+        import time
+        start = time.time()
+        while time.time() - start < timeout:
+            s = client.get("/api/scan.json").get_json()
+            if not s["running"]:
+                return s
+            time.sleep(0.02)
+        raise AssertionError("scan did not finish")
+
+    def test_interfaces(self, sim, client):
+        data = client.get("/api/scan/interfaces.json").get_json()
+        assert any(i["name"] == "wwan0" for i in data)
+
+    def test_discovery_flow(self, sim, client):
+        resp = client.post("/api/scan/discovery", json={"cidr": "192.168.1.0/24"})
+        assert resp.status_code == 200
+        s = self._wait_done(client)
+        assert s["kind"] == "discovery" and s["results"]
+
+    def test_reachability_flow(self, sim, client):
+        client.post("/api/scan/reachability", json={"target": "example.com", "interface": "wwan0"})
+        s = self._wait_done(client)
+        assert s["summary"]["http"]["status"] == 200
+
+    def test_traceroute_flow(self, sim, client):
+        client.post("/api/scan/traceroute", json={"target": "example.com"})
+        s = self._wait_done(client)
+        assert s["summary"]["reached"] is True
+
+    def test_bad_cidr_400(self, sim, client):
+        assert client.post("/api/scan/discovery", json={"cidr": "nope"}).status_code == 400
+
+    def test_missing_target_400(self, sim, client):
+        assert client.post("/api/scan/reachability", json={}).status_code == 400
+
+    def test_stop(self, sim, client):
+        assert client.post("/api/scan/stop").status_code == 200
+
+
 class TestJsonCommandApi:
     def test_simple_command(self, sim, client):
         resp = client.post("/api/cmd/reconnect")

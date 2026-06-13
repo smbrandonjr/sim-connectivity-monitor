@@ -25,6 +25,23 @@ export const api = {
   ),
   monitorConfig: () => getJSON<any>("/api/monitor-config.json"),
   placeholders: () => getJSON<Record<string, any>>("/api/placeholders.json"),
+  scanStatus: () => getJSON<any>("/api/scan.json"),
+  scanInterfaces: () => getJSON<any[]>("/api/scan/interfaces.json"),
+
+  async scanStart(kind: string, body: Record<string, unknown>): Promise<boolean> {
+    const res = await fetch(`/api/scan/${kind}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(data.error || "scan failed to start", "error");
+      return false;
+    }
+    return true;
+  },
+  scanStop: () => fetch("/api/scan/stop", { method: "POST" }),
 
   async saveMonitorConfig(cfg: Record<string, unknown>): Promise<boolean> {
     const res = await fetch("/api/monitor-config", {

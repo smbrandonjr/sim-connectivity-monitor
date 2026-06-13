@@ -27,6 +27,7 @@ class App:
     events: EventLog
     db: Database
     daemon: Daemon
+    scan: object  # scan.manager.ScanManager (network scanner, off the modem path)
     stop: threading.Event
 
 
@@ -70,7 +71,10 @@ def build(config: AppConfig, profiles: list[Profile]) -> App:
         clock=time.monotonic,
         notifier=SdNotifier(),
     )
-    return App(config, store, commands, events, db, daemon, threading.Event())
+    from sim_monitor.scan.manager import ScanManager
+
+    scan = ScanManager(simulate=config.simulate)
+    return App(config, store, commands, events, db, daemon, scan, threading.Event())
 
 
 def run(config: AppConfig, profiles: list[Profile]) -> int:
