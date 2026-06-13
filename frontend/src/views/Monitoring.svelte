@@ -17,6 +17,9 @@
   let headers: { key: string; value: string }[] = [];
 
   let history: any[] = [];
+  let total = 0;
+  let page = 0;
+  const PAGE_SIZE = 25;
 
   const PLACEHOLDERS = "{iccid} {imei} {imsi} {operator} {signal_rssi} {signal_percent} " +
     "{ip_address} {hostname} {timestamp} {state} {profile_name} {status} {status_message}";
@@ -37,8 +40,19 @@
   }
 
   async function loadHistory() {
-    history = await api.monitorHistory();
+    const data = await api.monitorHistory(PAGE_SIZE, page * PAGE_SIZE);
+    history = data.results;
+    total = data.total;
   }
+
+  function goPage(p: number) {
+    page = Math.max(0, Math.min(p, Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)));
+    loadHistory();
+  }
+
+  $: pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  $: rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  $: rangeEnd = Math.min(total, (page + 1) * PAGE_SIZE);
 
   function buildConfig() {
     const hdrs: Record<string, string> = {};
@@ -71,7 +85,8 @@
   onMount(() => {
     load();
     loadHistory();
-    const t = setInterval(loadHistory, 5000);
+    // Auto-refresh only on the first page, so browsing older pages stays put.
+    const t = setInterval(() => { if (page === 0) loadHistory(); }, 5000);
     return () => clearInterval(t);
   });
 </script>
@@ -126,7 +141,14 @@
 </section>
 
 <section class="ui-card">
-  <h2>Recent heartbeats</h2>
+  <div class="row">
+    <h2 style="flex:1">Recent heartbeats</h2>
+    {#if total > 0}
+      <span class="muted">{rangeStart}–{rangeEnd} of {total}</span>
+      <button class="ui-btn ui-btn-sm" disabled={page === 0} on:click={() => goPage(page - 1)}>‹ newer</button>
+      <button class="ui-btn ui-btn-sm" disabled={page >= pages - 1} on:click={() => goPage(page + 1)}>older ›</button>
+    {/if}
+  </div>
   <table>
     <thead><tr><th>Time</th><th>Result</th><th>Status</th><th>Latency</th><th>URL</th><th>Error</th></tr></thead>
     <tbody>

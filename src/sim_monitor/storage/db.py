@@ -142,12 +142,19 @@ class Database:
             self._prune("monitor_results")
             self._conn.commit()
 
-    def recent_monitor_results(self, limit: int = 200) -> list[dict]:
+    def recent_monitor_results(self, limit: int = 200, offset: int = 0) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM monitor_results ORDER BY id DESC LIMIT ?", (limit,)
+                "SELECT * FROM monitor_results ORDER BY id DESC LIMIT ? OFFSET ?",
+                (limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def count_monitor_results(self) -> int:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) AS n FROM monitor_results"
+            ).fetchone()["n"]
 
     def add_urc(self, kind: str, raw: str, data: dict[str, Any] | None = None) -> None:
         with self._lock:

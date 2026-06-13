@@ -15,7 +15,10 @@ export const api = {
   events: () => getJSON<any[]>("/api/events.json"),
   sms: () => getJSON<any[]>("/api/sms.json"),
   telemetry: () => getJSON<{ latest: any; history: any[] }>("/api/telemetry.json"),
-  monitorHistory: () => getJSON<any[]>("/api/monitor.json"),
+  monitorHistory: (limit = 25, offset = 0) =>
+    getJSON<{ results: any[]; total: number; limit: number; offset: number }>(
+      `/api/monitor.json?limit=${limit}&offset=${offset}`,
+    ),
   profiles: () => getJSON<any>("/api/profiles.json"),
   profile: (name: string) => getJSON<{ name: string; yaml: string; profile: any }>(
     `/api/profiles/${encodeURIComponent(name)}.json`,

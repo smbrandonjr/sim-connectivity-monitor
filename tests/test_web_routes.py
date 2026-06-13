@@ -104,6 +104,17 @@ class TestTimelineAndBundle:
         assert client.get("/api/events.json").status_code == 200
         assert client.get("/api/monitor.json").status_code == 200
 
+    def test_monitor_history_paginated(self, sim, client):
+        for i in range(30):
+            sim.db.add_monitor_result(f"https://x/{i}", 200, 12.0, ok=True)
+        page = client.get("/api/monitor.json?limit=10&offset=0").get_json()
+        assert page["total"] == 30
+        assert len(page["results"]) == 10
+        assert page["limit"] == 10
+        page2 = client.get("/api/monitor.json?limit=10&offset=10").get_json()
+        # offset returns different (older) rows
+        assert page2["results"][0]["url"] != page["results"][0]["url"]
+
 
 class TestTelemetryJson:
     def test_telemetry(self, sim, client):

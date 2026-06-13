@@ -66,7 +66,15 @@ def events():
 
 @bp.get("/monitor.json")
 def monitor_results():
-    return jsonify(sim().db.recent_monitor_results(limit=200))
+    db = sim().db
+    limit = max(1, min(request.args.get("limit", 25, type=int), 200))
+    offset = max(0, request.args.get("offset", 0, type=int))
+    return jsonify({
+        "results": db.recent_monitor_results(limit=limit, offset=offset),
+        "total": db.count_monitor_results(),
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 @bp.get("/timeline.json")
