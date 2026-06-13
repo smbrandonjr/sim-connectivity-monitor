@@ -334,7 +334,14 @@ def _trigger_update(app):
     script = str(Path(repo) / "deploy" / "self-update.sh")
     if not shutil.which("systemd-run"):
         return jsonify({"error": "systemd-run not available"}), 400
+    # Auto-named transient unit (no fixed name to collide on repeated updates);
+    # logs are visible via: journalctl -t sim-monitor-update
     subprocess.Popen(  # noqa: S603 - fixed argv, root-owned device, LAN-only
-        ["systemd-run", "--no-block", "--unit=sim-monitor-selfupdate", "bash", script, repo]
+        ["systemd-run", "--no-block", "--collect",
+         "--property=SyslogIdentifier=sim-monitor-update", "bash", script, repo]
     )
-    return jsonify({"ok": True, "message": "update started; the service will restart shortly"})
+    return jsonify({
+        "ok": True,
+        "message": "Update started — the service will restart in ~30–90s. "
+                   "Logs: journalctl -t sim-monitor-update",
+    })

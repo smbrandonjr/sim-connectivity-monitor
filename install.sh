@@ -16,9 +16,15 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-say "Installing OS packages (python3-venv, NetworkManager, ModemManager)"
-apt-get update -qq
-apt-get install -y -qq python3 python3-venv network-manager modemmanager > /dev/null
+# SKIP_APT=1 (set by self-update) skips the package step so updates are fast and
+# don't pull apt data over a metered cellular link. First install must run it.
+if [[ "${SKIP_APT:-0}" == "1" ]]; then
+    say "Skipping OS package step (SKIP_APT=1)"
+else
+    say "Installing OS packages (python3-venv, NetworkManager, ModemManager)"
+    apt-get update -qq
+    apt-get install -y -qq python3 python3-venv network-manager modemmanager > /dev/null
+fi
 
 say "Creating directories"
 mkdir -p "$APP_DIR" "$ETC_DIR/profiles.d" "$VAR_DIR"
