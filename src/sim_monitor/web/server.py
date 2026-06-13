@@ -32,6 +32,7 @@ def create_app(sim_app) -> Flask:
         api,
         diagnostics,
         logs,
+        messages,
         profiles,
         status,
         timeline,
@@ -44,6 +45,7 @@ def create_app(sim_app) -> Flask:
     flask_app.register_blueprint(logs.bp)
     flask_app.register_blueprint(diagnostics.bp)
     flask_app.register_blueprint(timeline.bp)
+    flask_app.register_blueprint(messages.bp)
     return flask_app
 
 

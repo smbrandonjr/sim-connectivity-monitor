@@ -112,6 +112,39 @@ class ATChannel:
                 self.close()
                 raise ModemError(f"AT port I/O error on {self.port}: {e}") from e
 
+    def send_with_prompt(
+        self, command: str, payload: str, timeout: float = 30.0
+    ) -> list[str]:
+        """Two-stage AT command: send `command`, wait for the '>' prompt, then
+        send `payload` + Ctrl-Z and read the final result. Used by AT+CMGS."""
+        deadline = time.monotonic() + timeout
+        with self._lock:
+            self.open()
+            assert self._ser is not None
+            try:
+                self._drain_pending()
+                self._ser.write((command + "\r").encode("ascii"))
+                self._wait_for_prompt(deadline)
+                self._ser.write(payload.encode("ascii") + b"\x1a")  # Ctrl-Z submits
+                return self._read_response(command, deadline)
+            except (serial.SerialException, OSError) as e:
+                self.close()
+                raise ModemError(f"AT port I/O error on {self.port}: {e}") from e
+
+    def _wait_for_prompt(self, deadline: float) -> None:
+        buf = b""
+        while time.monotonic() <= deadline:
+            ch = self._ser.read(1)
+            if not ch:
+                continue
+            buf += ch
+            if b">" in buf:
+                return
+            if b"ERROR" in buf:
+                raise ATCommandError(f"prompt request failed: {buf.decode(errors='replace')}")
+        self.close()
+        raise ModemError("timeout waiting for '>' SMS prompt")
+
     def drain_urcs(self) -> None:
         """Dispatch any buffered unsolicited lines (called once per daemon tick)."""
         with self._lock:

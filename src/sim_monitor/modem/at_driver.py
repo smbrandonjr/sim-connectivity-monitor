@@ -10,13 +10,14 @@ from __future__ import annotations
 import logging
 
 from sim_monitor.config.schema import PdpContext
-from sim_monitor.modem import at_parser
+from sim_monitor.modem import at_parser, pdu
 from sim_monitor.modem.at_channel import ATChannel, ATCommandError
 from sim_monitor.modem.at_parser import ActualPdpContext, ATParseError, SignalQuality
 from sim_monitor.modem.driver_base import (
     ModemDriver,
     ModemError,
     ModemIdentity,
+    RawSms,
     SimStatus,
     UrcEvent,
 )
@@ -151,3 +152,22 @@ class ATModemDriver(ModemDriver):
             kind, fields = at_parser.classify_urc(line)
             events.append(UrcEvent(raw=line, kind=kind, fields=fields))
         return events
+
+    # ── SMS (PDU mode) ──────────────────────────────────────────────────────
+    def list_sms(self) -> list[RawSms]:
+        self.at.execute("AT+CMGF=0")  # PDU mode
+        lines = self.at.execute("AT+CMGL=4", timeout=15)  # 4 = ALL messages
+        return [RawSms(idx, stat, pdu_hex) for idx, stat, pdu_hex in at_parser.parse_cmgl(lines)]
+
+    def send_sms(self, number: str, text: str) -> int:
+        self.at.execute("AT+CMGF=0")
+        parts = pdu.encode_submit(number, text)
+        for pdu_hex, tpdu_len in parts:
+            self.at.send_with_prompt(f"AT+CMGS={tpdu_len}", pdu_hex, timeout=30)
+        return len(parts)
+
+    def delete_sms(self, index: int) -> None:
+        self.at.execute(f"AT+CMGD={index}")
+
+    def delete_all_sms(self) -> None:
+        self.at.execute("AT+CMGD=1,4")  # delete all messages in all states

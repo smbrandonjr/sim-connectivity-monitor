@@ -61,6 +61,27 @@ class ResumeMonitor:
 
 
 @dataclass(frozen=True)
+class SendSms:
+    number: str
+    text: str
+
+
+@dataclass(frozen=True)
+class DeleteSms:
+    row_id: int
+
+
+@dataclass(frozen=True)
+class ClearSms:
+    pass
+
+
+@dataclass(frozen=True)
+class RefreshSms:
+    pass
+
+
+@dataclass(frozen=True)
 class ReloadProfiles:
     pass
 
@@ -76,6 +97,10 @@ Command = (
     | RunDiagnostics
     | PauseMonitor
     | ResumeMonitor
+    | SendSms
+    | DeleteSms
+    | ClearSms
+    | RefreshSms
     | ReloadProfiles
 )
 

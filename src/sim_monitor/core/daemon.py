@@ -115,6 +115,7 @@ class Daemon:
                 self._handle_command(command)
             handler = getattr(self, f"_state_{self.state.value.lower()}")
             handler()
+            self._maybe_fetch_sms()
         except Exception:
             # Last-resort guard: a bug must not kill the loop (systemd watchdog
             # still catches true hangs).
@@ -188,6 +189,14 @@ class Daemon:
             case cmd.ResumeMonitor():
                 self.store.update(monitor_paused=False)
                 self.events.info("monitor", "heartbeats resumed")
+            case cmd.SendSms(number=number, text=text):
+                self._send_sms(number, text)
+            case cmd.DeleteSms(row_id=row_id):
+                self._delete_sms(row_id)
+            case cmd.ClearSms():
+                self._clear_sms()
+            case cmd.RefreshSms():
+                self._sms_pending = True
             case cmd.ReloadProfiles():
                 self._reload_profiles()
 
@@ -263,6 +272,62 @@ class Daemon:
             elif ev.kind not in ("unknown",):
                 self.events.info("urc", f"{ev.kind}: {ev.raw}")
 
+    # ------------------------------------------------------------------ SMS
+
+    _SMS_SAFE_STATES = (S.CONNECTED, S.MODEM_FOUND, S.SIM_READY, S.DEGRADED)
+
+    def _maybe_fetch_sms(self) -> None:
+        if not (self._sms_pending and self.driver and self.state in self._SMS_SAFE_STATES):
+            return
+        self._sms_pending = False
+        try:
+            raw = self.driver.list_sms()
+        except ModemError as e:
+            self.events.warning("sms", f"could not list SMS: {e}")
+            return
+        from sim_monitor.modem.sms import reassemble_inbound
+
+        rows = reassemble_inbound(raw)
+        self.db.replace_inbound_sms(rows)
+        self.store.update(sms_unread=self.db.count_unread_sms())
+        if rows:
+            self.events.info("sms", f"inbox synced: {len(rows)} message(s)")
+
+    def _send_sms(self, number: str, text: str) -> None:
+        if self.driver is None:
+            self.events.error("sms", "cannot send SMS: no modem")
+            return
+        try:
+            parts = self.driver.send_sms(number, text)
+        except ModemError as e:
+            self.events.error("sms", f"send failed: {e}")
+            return
+        self.db.add_sent_sms(number, text, parts=parts)
+        self.events.info("sms", f"sent {parts}-part message to {number}")
+
+    def _delete_sms(self, row_id: int) -> None:
+        row = self.db.get_sms(row_id)
+        if row is None:
+            return
+        if row["direction"] == "in" and self.driver is not None:
+            for index in row["modem_indices"]:
+                try:
+                    self.driver.delete_sms(index)
+                except ModemError as e:
+                    self.events.warning("sms", f"delete index {index} failed: {e}")
+            self._sms_pending = True  # re-sync inbound from the modem
+        self.db.delete_sms_row(row_id)
+        self.store.update(sms_unread=self.db.count_unread_sms())
+
+    def _clear_sms(self) -> None:
+        if self.driver is not None:
+            try:
+                self.driver.delete_all_sms()
+            except ModemError as e:
+                self.events.warning("sms", f"clear failed: {e}")
+        self._sms_pending = True
+        self.events.info("sms", "cleared all messages on the modem")
+
     def _record_identity(self, reason: str) -> None:
         snap = self.store.get()
         key = (snap.iccid, snap.imsi, snap.imei)
@@ -297,6 +362,7 @@ class Daemon:
             return  # keep polling: SIM may be inserted any moment
         self.store.update(sim_present=True, iccid=sim.iccid, imsi=sim.imsi)
         self._record_identity("sim-ready")
+        self._sms_pending = True  # sync the inbox once the SIM is up
         self.events.info("sim", f"SIM ready, ICCID {sim.iccid}")
         self._go(S.SIM_READY)
 

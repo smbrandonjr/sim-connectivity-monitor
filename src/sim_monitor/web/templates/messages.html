@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Messages — sim-monitor{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>Messages</h1>
+  <form method="post" action="{{ url_for('messages.refresh') }}" class="inline">
+    <button type="submit" title="Re-read the modem's message store">Refresh</button>
+  </form>
+  <form method="post" action="{{ url_for('messages.clear') }}" class="inline"
+        onsubmit="return confirm('Delete ALL messages on the modem?')">
+    <button type="submit" class="danger">Clear all</button>
+  </form>
+</div>
+
+<section class="card">
+  <h2>Send a message</h2>
+  <form method="post" action="{{ url_for('messages.send') }}">
+    <div class="row">
+      <input type="text" name="number" placeholder="+12025550123" size="18">
+      <input type="text" name="text" placeholder="Message text" style="flex:1; min-width:240px">
+      <button type="submit">Send</button>
+    </div>
+  </form>
+</section>
+
+<table>
+  <thead><tr><th>Time</th><th>Dir</th><th>Peer</th><th>Message</th><th></th></tr></thead>
+  <tbody>
+  {% for m in messages %}
+    <tr class="{{ 'level-info' if m.direction == 'in' and m.status == 'unread' else '' }}">
+      <td class="nowrap">{{ m.ts | ts }}</td>
+      <td>
+        {% if m.direction == 'in' %}
+          <span class="badge badge-ok">in{% if m.status == 'unread' %} •{% endif %}</span>
+        {% else %}
+          <span class="badge badge-muted">sent</span>
+        {% endif %}
+      </td>
+      <td class="nowrap">{{ m.peer or "—" }}</td>
+      <td class="break">
+        {{ m.body }}
+        {% if m.encoding == '8bit' %}<span class="badge badge-warn">binary</span>{% endif %}
+        {% if m.parts and m.parts > 1 %}<span class="badge badge-muted">{{ m.parts }} parts</span>{% endif %}
+      </td>
+      <td>
+        <form method="post" action="{{ url_for('messages.delete', row_id=m.id) }}" class="inline">
+          <button type="submit" class="danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5">No messages. They sync from the modem automatically; use Refresh to re-read.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">Binary/OTA (class-2) messages are shown as hex. Incoming messages are
+read from the modem in PDU mode and reassembled if multi-part.</p>
+{% endblock %}

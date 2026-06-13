@@ -9,12 +9,14 @@ command failures.
 from __future__ import annotations
 
 from sim_monitor.config.schema import PdpContext
+from sim_monitor.modem import pdu
 from sim_monitor.modem.at_parser import ActualPdpContext, SignalQuality
 from sim_monitor.modem.driver_base import (
     ModemDetector,
     ModemDriver,
     ModemError,
     ModemIdentity,
+    RawSms,
     SimStatus,
     UrcEvent,
 )
@@ -45,6 +47,10 @@ class FakeModemDriver(ModemDriver):
         self.at_log: list[str] = []  # records init commands and resets
         self.event_reporting_enabled = False
         self._pending_urcs: list[UrcEvent] = []
+        # In-memory SMS store: index -> (status, pdu_hex). sent_log records outbound.
+        self._sms: dict[int, tuple[int, str]] = {}
+        self._next_sms_index = 1
+        self.sent_log: list[tuple[str, str]] = []  # (number, text)
 
     def _check(self) -> None:
         if self.fail_all:
@@ -133,6 +139,43 @@ class FakeModemDriver(ModemDriver):
         self._check()
         events, self._pending_urcs = self._pending_urcs, []
         return events
+
+    def list_sms(self) -> list[RawSms]:
+        self._check()
+        return [RawSms(idx, st, p) for idx, (st, p) in sorted(self._sms.items())]
+
+    def send_sms(self, number: str, text: str) -> int:
+        self._check()
+        self.sent_log.append((number, text))
+        return len(pdu.encode_submit(number, text))
+
+    def delete_sms(self, index: int) -> None:
+        self._check()
+        self._sms.pop(index, None)
+
+    def delete_all_sms(self) -> None:
+        self._check()
+        self._sms.clear()
+
+    # ── test/sim scripting helpers ──────────────────────────────────────────
+    def receive_sms(self, sender: str, text: str) -> int:
+        """Simulate an incoming SMS: store its PDU and queue a +CMTI URC."""
+        # Build a DELIVER PDU around the SUBMIT body (good enough for decoding).
+        submit_hex, _ = pdu.encode_submit(sender, text)[0]
+        b = bytes.fromhex(submit_hex)
+        oa_octets = 1 + (b[3] + 1) // 2
+        idx = 4 + oa_octets + 2  # past first/MR/DA/PID/DCS
+        dcs = b[4 + oa_octets + 1]
+        udl = b[idx]
+        ud = b[idx + 1:]
+        oa = b[3:4 + oa_octets].hex().upper()
+        deliver = ("0004" + oa + "00" + f"{dcs:02X}" + "00000000000000"
+                   + f"{udl:02X}" + ud.hex().upper())
+        index = self._next_sms_index
+        self._next_sms_index += 1
+        self._sms[index] = (0, deliver)  # 0 = unread
+        self.push_urc("new_sms", {"storage": "ME", "index": index}, raw=f'+CMTI: "ME",{index}')
+        return index
 
     # ── test/sim scripting helpers ──────────────────────────────────────────
     def push_urc(self, kind: str, fields: dict | None = None, raw: str = "") -> None:

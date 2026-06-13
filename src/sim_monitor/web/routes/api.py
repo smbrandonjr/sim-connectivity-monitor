@@ -34,6 +34,11 @@ def urcs():
     return jsonify(sim().db.recent_urcs(limit=300))
 
 
+@bp.get("/sms.json")
+def sms():
+    return jsonify(sim().db.recent_sms(limit=200))
+
+
 @bp.get("/identity.json")
 def identity():
     return jsonify(sim().db.recent_identity(limit=100))

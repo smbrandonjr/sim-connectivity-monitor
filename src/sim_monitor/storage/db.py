@@ -52,6 +52,19 @@ CREATE TABLE IF NOT EXISTS identity_history (
     reason TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_identity_ts ON identity_history(ts);
+CREATE TABLE IF NOT EXISTS sms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    direction TEXT NOT NULL,         -- 'in' | 'out'
+    peer TEXT,
+    body TEXT,
+    encoding TEXT,
+    status TEXT,                     -- 'unread' | 'read' | 'sent'
+    modem_indices TEXT,              -- JSON list of modem storage indices (inbound)
+    parts INTEGER DEFAULT 1,
+    raw_pdu TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sms_ts ON sms(ts);
 """
 
 MAX_ROWS = 5000
@@ -161,6 +174,66 @@ class Database:
                 "SELECT * FROM identity_history ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ── SMS ──────────────────────────────────────────────────────────────
+    def replace_inbound_sms(self, rows: list[dict[str, Any]]) -> None:
+        """Replace the inbound message set with the modem's current contents."""
+        with self._lock:
+            self._conn.execute("DELETE FROM sms WHERE direction = 'in'")
+            for r in rows:
+                self._conn.execute(
+                    "INSERT INTO sms (ts, direction, peer, body, encoding, status,"
+                    " modem_indices, parts, raw_pdu)"
+                    " VALUES (?, 'in', ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        r["ts"], r["peer"], r["body"], r["encoding"], r["status"],
+                        json.dumps(r["modem_indices"]), r.get("parts", 1), r.get("raw_pdu"),
+                    ),
+                )
+            self._conn.commit()
+
+    def add_sent_sms(self, peer: str, body: str, parts: int = 1) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO sms (ts, direction, peer, body, encoding, status, parts)"
+                " VALUES (?, 'out', ?, ?, 'gsm7', 'sent', ?)",
+                (time.time(), peer, body, parts),
+            )
+            self._prune("sms")
+            self._conn.commit()
+
+    def recent_sms(self, limit: int = 200) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM sms ORDER BY ts DESC LIMIT ?", (limit,)
+            ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["modem_indices"] = json.loads(d["modem_indices"]) if d["modem_indices"] else []
+            result.append(d)
+        return result
+
+    def get_sms(self, sms_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM sms WHERE id = ?", (sms_id,)).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["modem_indices"] = json.loads(d["modem_indices"]) if d["modem_indices"] else []
+        return d
+
+    def delete_sms_row(self, sms_id: int) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM sms WHERE id = ?", (sms_id,))
+            self._conn.commit()
+
+    def count_unread_sms(self) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM sms WHERE direction='in' AND status='unread'"
+            ).fetchone()
+        return row["n"]
 
     def _prune(self, table: str) -> None:
         # Caller holds the lock.

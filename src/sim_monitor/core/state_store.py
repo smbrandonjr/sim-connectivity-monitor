@@ -95,6 +95,7 @@ class Snapshot:
     fallback: FallbackStatus = field(default_factory=FallbackStatus)
     diagnostics: DiagnosticsReport | None = None
     monitor_paused: bool = False  # runtime-only; resets on service restart
+    sms_unread: int = 0
     updated_at: float = field(default_factory=time.time)
 
     def placeholder_context(self) -> dict[str, Any]:

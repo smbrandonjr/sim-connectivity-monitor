@@ -214,6 +214,31 @@ def classify_urc(line: str) -> tuple[str, dict]:
     return "unknown", {"raw": line}
 
 
+def parse_cmgl(lines: list[str]) -> list[tuple[int, int, str]]:
+    """Parse AT+CMGL (PDU mode): header lines '+CMGL: idx,stat,alpha,len'
+    each followed by a PDU hex line. Returns [(index, status, pdu_hex)]."""
+    out = []
+    pending: tuple[int, int] | None = None
+    for line in lines:
+        m = re.match(r"\+CMGL:\s*(\d+)\s*,\s*(\d+)\s*,", line)
+        if m:
+            pending = (int(m.group(1)), int(m.group(2)))
+            continue
+        if pending and re.fullmatch(r"[0-9A-Fa-f]+", line.strip()):
+            out.append((pending[0], pending[1], line.strip().upper()))
+            pending = None
+    return out
+
+
+def parse_cmgs(lines: list[str]) -> int | None:
+    """Parse the +CMGS: <mr> message-reference returned after sending."""
+    for line in lines:
+        m = re.match(r"\+CMGS:\s*(\d+)", line)
+        if m:
+            return int(m.group(1))
+    return None
+
+
 def parse_cereg(lines: list[str]) -> dict | None:
     """Parse a solicited AT+CEREG? reply: +CEREG: <n>,<stat>[,"<tac>","<ci>"...]."""
     for line in lines:

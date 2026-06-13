@@ -225,6 +225,38 @@ class TestDiagnostics:
         assert b"+CSQ: 18,99" in page.data
 
 
+class TestMessages:
+    def test_inbox_renders(self, sim, client):
+        page = client.get("/messages/")
+        assert page.status_code == 200
+        assert b"Send a message" in page.data
+
+    def test_send_enqueues_command(self, sim, client):
+        resp = client.post("/messages/send", data={"number": "+12025550123", "text": "hi"})
+        assert resp.status_code == 302
+        assert cmd.SendSms(number="+12025550123", text="hi") in sim.commands.drain()
+
+    def test_send_requires_fields(self, sim, client):
+        client.post("/messages/send", data={"number": "", "text": ""})
+        assert sim.commands.drain() == []
+
+    def test_refresh_and_clear(self, sim, client):
+        client.post("/messages/refresh")
+        client.post("/messages/clear")
+        drained = sim.commands.drain()
+        assert cmd.RefreshSms() in drained
+        assert cmd.ClearSms() in drained
+
+    def test_incoming_message_appears_in_inbox(self, sim, client):
+        tick_until_connected(sim)
+        sim.daemon.driver.receive_sms("+12025550123", "field test message")
+        sim.daemon.tick()
+        page = client.get("/messages/")
+        assert b"field test message" in page.data
+        data = client.get("/api/sms.json").get_json()
+        assert any(m["body"] == "field test message" for m in data)
+
+
 class TestLogs:
     def test_events_page(self, sim, client):
         tick_until_connected(sim)

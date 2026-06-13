@@ -241,8 +241,7 @@ class TestOtaSwap:
         harness.driver.push_urc("new_sms", {"storage": "ME", "index": 1}, raw='+CMTI: "ME",1')
         harness.tick()
         urcs = harness.db.recent_urcs()
-        assert any(u["kind"] == "new_sms" for u in urcs)
-        assert harness.daemon.sms_pending is True
+        assert any(u["kind"] == "new_sms" for u in urcs)  # raw URC recorded for forensics
 
     def test_registration_urc_updates_store(self, harness):
         harness.run_until(State.CONNECTED)
@@ -346,6 +345,45 @@ class TestLastDitchFallback:
         self._run_until_parked_and_degraded(h)
         h.tick()
         assert h.daemon.active_profile.name == "strict"  # never switched
+
+
+class TestSmsFlow:
+    def test_incoming_sms_syncs_inbox(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.driver.receive_sms("+12025550123", "hello from the field")
+        harness.tick()  # +CMTI -> sms_pending -> fetch
+        rows = harness.db.recent_sms()
+        assert any(r["body"] == "hello from the field" for r in rows)
+        assert harness.store.get().sms_unread >= 1
+
+    def test_send_sms_command(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.queue.put(cmd.SendSms(number="+12025550123", text="ping"))
+        harness.tick()
+        assert harness.driver.sent_log == [("+12025550123", "ping")]
+        rows = harness.db.recent_sms()
+        assert any(r["direction"] == "out" and r["body"] == "ping" for r in rows)
+
+    def test_delete_inbound_sms(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.driver.receive_sms("+1", "x")
+        harness.tick()
+        row = next(r for r in harness.db.recent_sms() if r["direction"] == "in")
+        harness.queue.put(cmd.DeleteSms(row_id=row["id"]))
+        harness.tick()  # deletes from modem + marks resync
+        harness.tick()  # resync runs
+        assert harness.driver.list_sms() == []
+        assert not [r for r in harness.db.recent_sms() if r["direction"] == "in"]
+
+    def test_clear_all_sms(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.driver.receive_sms("+1", "a")
+        harness.driver.receive_sms("+2", "b")
+        harness.tick()
+        harness.queue.put(cmd.ClearSms())
+        harness.tick()
+        harness.tick()
+        assert harness.driver.list_sms() == []
 
 
 class TestRecovery:

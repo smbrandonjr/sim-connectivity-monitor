@@ -37,6 +37,15 @@ class SimStatus:
 
 
 @dataclass(frozen=True)
+class RawSms:
+    """One stored SMS as listed by AT+CMGL in PDU mode."""
+
+    index: int
+    status: int  # 0 unread, 1 read, 2 stored-unsent, 3 stored-sent
+    pdu_hex: str
+
+
+@dataclass(frozen=True)
 class UrcEvent:
     """A classified unsolicited result code from the modem.
 
@@ -122,6 +131,21 @@ class ModemDriver(ABC):
     @abstractmethod
     def poll_events(self) -> list[UrcEvent]:
         """Return (and clear) URCs captured since the last call."""
+
+    @abstractmethod
+    def list_sms(self) -> list[RawSms]:
+        """List all stored SMS (PDU mode)."""
+
+    @abstractmethod
+    def send_sms(self, number: str, text: str) -> int:
+        """Send an SMS (splitting into concatenated parts if needed). Returns
+        the number of parts sent."""
+
+    @abstractmethod
+    def delete_sms(self, index: int) -> None: ...
+
+    @abstractmethod
+    def delete_all_sms(self) -> None: ...
 
 
 class ModemDetector(ABC):

@@ -30,6 +30,11 @@ class ScriptedChannel:
     def drain_urcs(self):
         pass
 
+    def send_with_prompt(self, command, payload, timeout=30):
+        self.executed.append(command)
+        self.executed.append(f"<payload:{payload}>")
+        return ["+CMGS: 42"]
+
     def open(self):
         pass
 
@@ -214,3 +219,32 @@ class TestUrcLifecycle:
         assert len(events) == 1
         assert events[0].kind == "new_sms"
         assert events[0].fields["index"] == 9
+
+
+class TestSms:
+    def test_list_sms_uses_pdu_mode(self):
+        channel = ScriptedChannel({
+            "AT+CMGF=0": [],
+            "AT+CMGL=4": ["+CMGL: 1,0,,24", "0791ABCDEF", "+CMGL: 2,1,,24", "0791123456"],
+        })
+        raw = QuectelDriver(channel).list_sms()
+        assert "AT+CMGF=0" in channel.executed
+        assert [(r.index, r.status) for r in raw] == [(1, 0), (2, 1)]
+        assert raw[0].pdu_hex == "0791ABCDEF"
+
+    def test_send_sms_uses_prompt(self):
+        channel = ScriptedChannel({"AT+CMGF=0": []})
+        parts = QuectelDriver(channel).send_sms("+12025550123", "hello")
+        assert parts == 1
+        assert any(c.startswith("AT+CMGS=") for c in channel.executed)
+        assert any(c.startswith("<payload:") for c in channel.executed)
+
+    def test_delete(self):
+        channel = ScriptedChannel({"AT+CMGD=3": []})
+        QuectelDriver(channel).delete_sms(3)
+        assert channel.executed == ["AT+CMGD=3"]
+
+    def test_delete_all(self):
+        channel = ScriptedChannel({"AT+CMGD=1,4": []})
+        QuectelDriver(channel).delete_all_sms()
+        assert channel.executed == ["AT+CMGD=1,4"]
