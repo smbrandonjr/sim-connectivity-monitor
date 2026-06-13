@@ -188,6 +188,41 @@ class TestJsonCommandApi:
         assert "simulate" in resp.get_json()["error"]
 
 
+class TestMonitorConfigApi:
+    def test_default_disabled(self, sim, client):
+        data = client.get("/api/monitor-config.json").get_json()
+        assert data["enabled"] is False
+
+    def test_set_global_config(self, sim, client):
+        cfg = {
+            "enabled": True,
+            "interval_seconds": 120,
+            "request": {"method": "POST", "url": "https://hooks.example.com/hb"},
+        }
+        assert client.put("/api/monitor-config", json=cfg).status_code == 200
+        sim.daemon.tick()  # process ReloadMonitorConfig
+        eff = sim.daemon.effective_monitor_config()
+        assert eff is not None and eff.enabled and eff.interval_seconds == 120
+        assert client.get("/api/monitor-config.json").get_json()["interval_seconds"] == 120
+
+    def test_invalid_config_400(self, sim, client):
+        resp = client.put("/api/monitor-config", json={"enabled": True})  # no request
+        assert resp.status_code == 400
+
+    def test_profile_override_wins_when_enabled(self, sim, client):
+        # Global disabled; an enabled profile monitor overrides it.
+        prof_yaml = (
+            "name: ov\nmatch: {iccid_patterns: ['*'], priority: 5}\n"
+            "pdp_contexts: [{cid: 1, apn: hologram, bearer: true}]\n"
+            "monitor:\n  enabled: true\n  interval_seconds: 45\n"
+            "  request: {method: POST, url: 'https://p/override'}\n"
+        )
+        client.post("/api/profiles", json={"yaml": prof_yaml})
+        tick_until_connected(sim)  # active profile becomes 'ov' (priority 5 beats 1000)
+        eff = sim.daemon.effective_monitor_config()
+        assert eff is not None and eff.request.url == "https://p/override"
+
+
 class TestJsonProfileApi:
     def test_list(self, sim, client):
         data = client.get("/api/profiles.json").get_json()

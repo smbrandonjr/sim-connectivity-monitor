@@ -77,6 +77,10 @@ CREATE TABLE IF NOT EXISTS sim_names (
     iccid TEXT PRIMARY KEY,
     name TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 MAX_ROWS = 5000
@@ -284,6 +288,23 @@ class Database:
                 )
             else:  # empty name clears it
                 self._conn.execute("DELETE FROM sim_names WHERE iccid = ?", (iccid,))
+            self._conn.commit()
+
+    # ── key/value settings (JSON values) ─────────────────────────────────
+    def get_setting(self, key: str) -> Any | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+        return json.loads(row["value"]) if row else None
+
+    def set_setting(self, key: str, value: Any) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, json.dumps(value)),
+            )
             self._conn.commit()
 
     def count_unread_sms(self) -> int:

@@ -1,8 +1,10 @@
 """Periodic HTTP heartbeat with SIM-specific placeholder substitution.
 
 Runs in its own thread; reads daemon status from the StateStore, never touches
-the modem. Probes fire only while CONNECTED (scheduled) or on explicit
-RunMonitorNow trigger from the UI.
+the modem. The config it uses is resolved by the daemon (the UI-managed global
+config, or a profile's monitor block when that profile overrides it). Probes
+fire on schedule while CONNECTED, keep firing over any interface while degraded
+(if configured), and on an explicit RunMonitorNow trigger.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from collections.abc import Callable
 
 import requests
 
-from sim_monitor.config.schema import Profile
+from sim_monitor.config.schema import MonitorConfig
 from sim_monitor.core.events import EventLog
 from sim_monitor.core.state_store import StateStore
 from sim_monitor.core.states import State
@@ -31,13 +33,13 @@ class HttpMonitor:
         store: StateStore,
         db: Database,
         events: EventLog,
-        get_profile: Callable[[], Profile | None],
+        get_config: Callable[[], MonitorConfig | None],
         trigger: threading.Event,
     ) -> None:
         self.store = store
         self.db = db
         self.events = events
-        self.get_profile = get_profile
+        self.get_config = get_config
         self.trigger = trigger
         self._next_due: float | None = None
 
@@ -51,44 +53,41 @@ class HttpMonitor:
             self._iteration(forced)
 
     def _iteration(self, forced: bool) -> None:
-        profile = self.get_profile()
-        if profile is None or profile.monitor.request is None:
+        config = self.get_config()
+        if config is None or config.request is None:
             if forced:
                 self.db.add_monitor_result(
                     url="", status_code=None, latency_ms=None, ok=False,
-                    error="no monitor request configured for the active profile",
+                    error="no heartbeat endpoint configured",
                 )
             return
         now = time.monotonic()
-        scheduled = (
-            profile.monitor.enabled
-            and (self._next_due is None or now >= self._next_due)
-        )
+        scheduled = config.enabled and (self._next_due is None or now >= self._next_due)
         if not (forced or scheduled):
             return
         snapshot = self.store.get()
         if snapshot.monitor_paused and not forced:
             return  # paused: hold the schedule; resumes where it left off
         connected = snapshot.state is State.CONNECTED
-        if not connected and not forced and not profile.monitor.send_when_degraded:
+        if not connected and not forced and not config.send_when_degraded:
             return  # don't reschedule; fire as soon as we're connected again
-        self._next_due = now + profile.monitor.interval_seconds
-        self.probe(profile)
+        self._next_due = now + config.interval_seconds
+        self.probe(config)
 
-    def probe(self, profile: Profile) -> bool:
-        """Send one monitor request and record the result. Returns success.
+    def probe(self, config: MonitorConfig) -> bool:
+        """Send one heartbeat and record the result. Returns success.
 
         While CONNECTED the socket is bound to the cellular interface (a
         success proves cellular egress). Otherwise the request goes out
         unbound — over ethernet/wifi if available — carrying
         {status}=degraded so the endpoint learns *why* instead of silence.
         """
-        request = profile.monitor.request
+        request = config.request
         assert request is not None
         snapshot = self.store.get()
         bind_interface = (
             snapshot.interface
-            if snapshot.state is State.CONNECTED and profile.monitor.bind_cellular
+            if snapshot.state is State.CONNECTED and config.bind_cellular
             else None
         )
         url, headers, body, unknown = render_request(

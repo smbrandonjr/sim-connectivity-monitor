@@ -120,34 +120,23 @@ traffic flows over cellular; the dashboard's "Default route OK" should read *yes
 ## 6. Create your own profiles
 
 The committed default (`00-hologram-default.yaml`) matches any SIM and uses a single
-IPv4 context with APN `hologram`. For SIMs that need more, add profiles via the web UI
-or drop YAML files into `/etc/sim-monitor/profiles.d/` (see
-`config/profiles.d/50-custom.yaml.example` for every field):
+IPv4 context with APN `hologram`. Create more in the web UI's **Profiles** tab — a
+structured form (no YAML required; a raw-YAML toggle is there for edge cases). A profile
+covers ICCID match patterns, 1–3 PDP contexts (the modem is reconciled to *exactly*
+these), optional alternative PDP variants tried in order, routing, and AT init commands.
 
-```yaml
-name: three-context-sims
-match:
-  iccid_patterns: ["8944502*"]     # exact ICCID or trailing-* prefix
-  priority: 10                     # lower wins ties; default profile is 1000
-pdp_contexts:                      # the modem will have EXACTLY these (1-3)
-  - { cid: 1, apn: hologram, pdp_type: IPv4v6, bearer: true }
-  - { cid: 2, apn: hologram.special, auth: pap, username: u, password: p }
-  - { cid: 3, apn: ims, pdp_type: IPv4v6 }
-monitor:
-  enabled: true
-  interval_seconds: 300
-  request:
-    method: POST
-    url: "https://hooks.example.com/heartbeat"
-    headers: { Authorization: "Bearer YOUR_TOKEN" }
-    body: '{"iccid":"{iccid}","rssi":{signal_rssi},"ip":"{ip_address}","ts":"{timestamp}"}'
-```
+Profiles can also be dropped as YAML files into `/etc/sim-monitor/profiles.d/`. **These
+files can hold secrets and live only on the device; never commit them** (gitignored).
 
-Files added by hand need a `Reload` — easiest is editing anything in the web UI, or
-`sudo systemctl restart sim-monitor`. **These files can hold secrets and live only on
-the device; never commit them** (the repo gitignores them).
+## 7. Monitoring (heartbeat)
 
-Available monitor placeholders: `{iccid} {imei} {imsi} {operator} {signal_rssi}
+Heartbeat monitoring is a **global** setting in the web UI's **Monitoring** tab — one
+endpoint for all SIMs, with the recent heartbeat history shown below the form. (A profile
+may override it for one SIM by enabling its own `monitor` block.) Configure the URL,
+method, headers, body, interval, and the egress behavior:
+
+Available placeholders (usable in URL, headers, body): `{iccid} {imei} {imsi} {operator}
+{signal_rssi}
 {signal_percent} {ip_address} {interface} {hostname} {timestamp} {state} {profile_name}
 {status} {status_message}`.
 
@@ -159,15 +148,16 @@ proves cellular egress even with ethernet connected — and `{status}` renders a
 `{status}` = `degraded` and `{status_message}` carrying a one-line reason
 (e.g. `recovery in progress: connect failed: ...`, `modem found, waiting for SIM: no SIM
 inserted`). During a fallback test `{status}` is `fallback_test` so you can suppress
-alerts for intentional outages. Set `monitor.send_when_degraded: false` in a profile to
-restore pause-until-reconnected behavior.
+alerts for intentional outages. Uncheck **keep sending while degraded** to restore
+pause-until-reconnected behavior, and uncheck **bind to cellular** when your endpoint is
+only reachable over the LAN/VPN (e.g. testing against a local server).
 
-## 7. Test Hologram fallback / outage protection
+## 8. Test Hologram fallback / outage protection
 
 On the dashboard, set a duration (default 900 s = 15 min) and click **Start fallback
 test**. The daemon puts the modem in airplane mode, shows a countdown, then re-enables
 the radio, re-reads the ICCID (the SIM applet may have switched profiles), re-matches
-your profiles, and reconnects. The Events page logs the before/after identity.
+your profiles, and reconnects. The Timeline page logs the before/after identity.
 
 ## Operating
 

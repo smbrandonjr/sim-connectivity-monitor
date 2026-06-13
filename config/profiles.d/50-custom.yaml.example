@@ -50,29 +50,23 @@ routing:
   make_default: true
   metric: 50
 
-# Periodic HTTP heartbeat. While cellular is CONNECTED it is sent out the
-# cellular interface (proves cellular egress); while cellular is down it keeps
-# firing over any other route (ethernet/wifi) with {status}=degraded so your
-# endpoint hears "I'm alive but cellular is down" instead of silence.
-# Placeholders: {iccid} {imei} {imsi} {operator} {signal_rssi} {signal_percent}
-#               {ip_address} {hostname} {timestamp} {state} {profile_name}
-#               {status} {status_message}
-#   {status}: connected | degraded | fallback_test
-#   {status_message}: one-line reason, e.g. "recovery in progress: connect failed: ..."
+# Heartbeat/monitoring is a GLOBAL setting managed in the web UI ("Monitoring"
+# tab) and applies to every SIM. Only include this `monitor` block if THIS
+# profile must OVERRIDE the global config (e.g. a different endpoint for one
+# SIM). When enabled here, it wins over the global config while this profile is
+# active. Placeholders (URL/headers/body): {iccid} {imei} {imsi} {operator}
+# {signal_rssi} {signal_percent} {ip_address} {hostname} {timestamp} {state}
+# {profile_name} {status} {status_message}.
 monitor:
-  enabled: true
-  interval_seconds: 300
-  send_when_degraded: true   # false = pause probes until cellular reconnects
-  bind_cellular: true        # false = endpoint only reachable via LAN/VPN (testing)
-  request:
-    method: POST
-    url: "https://hooks.example.com/heartbeat"
-    headers:
-      Content-Type: application/json
-      Authorization: "Bearer REPLACE_ME"
-    body: '{"iccid":"{iccid}","imei":"{imei}","operator":"{operator}","rssi":{signal_rssi},"ip":"{ip_address}","host":"{hostname}","ts":"{timestamp}","status":"{status}","status_message":"{status_message}"}'
-    timeout_seconds: 15
-    expect_status: [200, 204]
+  enabled: false
+  # interval_seconds: 300
+  # send_when_degraded: true   # keep sending over wifi/eth while cellular is down
+  # bind_cellular: true        # false = endpoint only reachable via LAN/VPN
+  # request:
+  #   method: POST
+  #   url: "https://hooks.example.com/heartbeat"
+  #   headers: { Authorization: "Bearer REPLACE_ME" }
+  #   body: '{"iccid":"{iccid}","status":"{status}","ts":"{timestamp}"}'
 
 fallback_test:
   airplane_seconds: 900

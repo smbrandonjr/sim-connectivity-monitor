@@ -14,7 +14,7 @@ import time
 
 from sim_monitor.config.loader import load_profiles
 from sim_monitor.config.matcher import match_profile
-from sim_monitor.config.schema import AppConfig, Profile
+from sim_monitor.config.schema import AppConfig, MonitorConfig, Profile
 from sim_monitor.core import commands as cmd
 from sim_monitor.core.commands import CommandQueue
 from sim_monitor.core.events import EventLog
@@ -91,8 +91,31 @@ class Daemon:
         self._variant_index = 0             # which PDP-context variant we're trying
         self._fallback_active = False       # on the built-in last-ditch default
         self._next_telemetry = 0.0          # monotonic time of next telemetry poll
+        self.global_monitor: MonitorConfig | None = None
+        self._load_global_monitor()
 
         store.update(profile_count=len(profiles))
+
+    def _load_global_monitor(self) -> None:
+        """Load the global heartbeat config from the device DB (UI-managed)."""
+        raw = self.db.get_setting("monitor")
+        if not raw:
+            self.global_monitor = None
+            return
+        try:
+            self.global_monitor = MonitorConfig.model_validate(raw)
+        except Exception as e:  # noqa: BLE001 - bad stored config must not crash boot
+            log.warning("invalid stored global monitor config: %s", e)
+            self.global_monitor = None
+
+    def effective_monitor_config(self) -> MonitorConfig | None:
+        """The heartbeat config to use now: a profile's monitor overrides the
+        global one only when the profile explicitly enables it; otherwise the
+        UI-managed global config applies."""
+        profile = self.active_profile
+        if profile and profile.monitor.enabled and profile.monitor.request is not None:
+            return profile.monitor
+        return self.global_monitor
 
     @property
     def sms_pending(self) -> bool:
@@ -200,6 +223,9 @@ class Daemon:
                 self._sms_pending = True
             case cmd.SetSimName(name=name):
                 self._set_sim_name(name)
+            case cmd.ReloadMonitorConfig():
+                self._load_global_monitor()
+                self.events.info("monitor", "global heartbeat config updated")
             case cmd.ReloadProfiles():
                 self._reload_profiles()
 

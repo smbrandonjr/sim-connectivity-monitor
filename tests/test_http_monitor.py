@@ -72,7 +72,7 @@ def env(monkeypatch):
         store=store,
         db=db,
         events=EventLog(db),
-        get_profile=lambda: PROFILE,
+        get_config=lambda: PROFILE.monitor,
         trigger=threading.Event(),
     )
     return monitor, session, db
@@ -80,7 +80,7 @@ def env(monkeypatch):
 
 def test_probe_renders_placeholders_and_records_ok(env):
     monitor, session, db = env
-    assert monitor.probe(PROFILE) is True
+    assert monitor.probe(PROFILE.monitor) is True
     call = session.calls[0]
     assert call["url"] == "https://hooks.example.com/hb/8944500612345678901"
     assert call["headers"]["X-IMEI"] == "490154203237518"
@@ -93,7 +93,7 @@ def test_probe_renders_placeholders_and_records_ok(env):
 def test_probe_unexpected_status_recorded_as_failure(env):
     monitor, session, db = env
     session.status_code = 500
-    assert monitor.probe(PROFILE) is False
+    assert monitor.probe(PROFILE.monitor) is False
     result = db.recent_monitor_results(1)[0]
     assert result["ok"] == 0
     assert "500" in result["error"]
@@ -102,7 +102,7 @@ def test_probe_unexpected_status_recorded_as_failure(env):
 def test_probe_network_error_recorded(env):
     monitor, session, db = env
     session.exc = requests.ConnectionError("no route to host")
-    assert monitor.probe(PROFILE) is False
+    assert monitor.probe(PROFILE.monitor) is False
     result = db.recent_monitor_results(1)[0]
     assert result["ok"] == 0
     assert "no route" in result["error"]
@@ -110,15 +110,15 @@ def test_probe_network_error_recorded(env):
 
 def test_probe_binds_cellular_while_connected(env):
     monitor, session, _ = env
-    monitor.probe(PROFILE)
+    monitor.probe(PROFILE.monitor)
     assert session.bound_interfaces == ["wwan0"]
 
 
 def test_bind_cellular_false_for_lan_endpoints(env):
     monitor, session, _ = env
-    lan_profile = PROFILE.model_copy(deep=True)
-    lan_profile.monitor.bind_cellular = False
-    monitor.probe(lan_profile)
+    lan = PROFILE.monitor.model_copy(deep=True)
+    lan.bind_cellular = False
+    monitor.probe(lan)
     assert session.bound_interfaces == [None]  # routed normally (LAN reachable)
 
 
@@ -143,7 +143,7 @@ def test_degraded_probe_goes_unbound_with_status_payload(env):
     monitor, session, db = env
     # Cellular went down: daemon is in DEGRADED, interface info is stale.
     monitor.store.set_state(State.DEGRADED, last_error="connection lost")
-    assert monitor.probe(STATUS_PROFILE) is True
+    assert monitor.probe(STATUS_PROFILE.monitor) is True
     assert session.bound_interfaces == [None]  # any working route (eth/wlan)
     body = session.calls[0]["data"].decode()
     assert '"status":"degraded"' in body
@@ -153,7 +153,7 @@ def test_degraded_probe_goes_unbound_with_status_payload(env):
 def test_connected_probe_reports_connected_status(env):
     monitor, session, _ = env
     monitor.store.update(operator="Hologram")
-    monitor.probe(STATUS_PROFILE)
+    monitor.probe(STATUS_PROFILE.monitor)
     body = session.calls[0]["data"].decode()
     assert '"status":"connected"' in body
     assert "via Hologram" in body
@@ -166,7 +166,7 @@ def test_send_when_degraded_default_on():
 class TestPause:
     def test_paused_holds_scheduled_sends(self, env):
         monitor, session, _ = env
-        monitor.get_profile = lambda: PROFILE
+        monitor.get_config = lambda: PROFILE.monitor
         monitor.store.update(monitor_paused=True)
         monitor._iteration(forced=False)
         assert session.calls == []

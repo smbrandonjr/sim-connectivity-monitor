@@ -87,6 +87,11 @@ class SetSimName:
 
 
 @dataclass(frozen=True)
+class ReloadMonitorConfig:
+    pass
+
+
+@dataclass(frozen=True)
 class ReloadProfiles:
     pass
 
@@ -107,6 +112,7 @@ Command = (
     | ClearSms
     | RefreshSms
     | SetSimName
+    | ReloadMonitorConfig
     | ReloadProfiles
 )
 

@@ -87,7 +87,7 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
         store=app.store,
         db=app.db,
         events=app.events,
-        get_profile=lambda: app.daemon.active_profile,
+        get_config=app.daemon.effective_monitor_config,
         trigger=app.daemon.monitor_trigger,
     )
     monitor_thread = threading.Thread(

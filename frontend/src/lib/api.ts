@@ -17,9 +17,24 @@ export const api = {
   telemetry: () => getJSON<{ latest: any; history: any[] }>("/api/telemetry.json"),
   monitorHistory: () => getJSON<any[]>("/api/monitor.json"),
   profiles: () => getJSON<any>("/api/profiles.json"),
-  profileYaml: (name: string) => getJSON<{ name: string; yaml: string }>(
+  profile: (name: string) => getJSON<{ name: string; yaml: string; profile: any }>(
     `/api/profiles/${encodeURIComponent(name)}.json`,
   ),
+  monitorConfig: () => getJSON<any>("/api/monitor-config.json"),
+
+  async saveMonitorConfig(cfg: Record<string, unknown>): Promise<boolean> {
+    const res = await fetch("/api/monitor-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(data.error || "save failed", "error");
+      return false;
+    }
+    return true;
+  },
 
   async cmd(name: string, body?: Record<string, unknown>): Promise<boolean> {
     const res = await fetch(`/api/cmd/${name}`, {
@@ -36,11 +51,11 @@ export const api = {
     return true;
   },
 
-  async saveProfile(yamlText: string, name?: string): Promise<boolean> {
+  async saveProfile(body: { profile?: any; yaml?: string }, name?: string): Promise<boolean> {
     const res = await fetch(name ? `/api/profiles/${encodeURIComponent(name)}` : "/api/profiles", {
       method: name ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ yaml: yamlText }),
+      body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {

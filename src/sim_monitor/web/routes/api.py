@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from sim_monitor import __version__
 from sim_monitor.config import loader
-from sim_monitor.config.schema import Profile
+from sim_monitor.config.schema import MonitorConfig, Profile
 from sim_monitor.core import commands as cmd
 from sim_monitor.core.diagnostics import build_bundle, build_timeline
 from sim_monitor.web.routes._helpers import sim
@@ -172,6 +172,26 @@ def command(name: str):
     return jsonify({"ok": True})
 
 
+@bp.get("/monitor-config.json")
+def monitor_config_get():
+    """The UI-managed global heartbeat config (secret-free shape + values; this
+    lives only on the device DB, never committed)."""
+    raw = sim().db.get_setting("monitor")
+    return jsonify(raw or MonitorConfig().model_dump(mode="json"))
+
+
+@bp.put("/monitor-config")
+def monitor_config_put():
+    body = _body()
+    try:
+        config = MonitorConfig.model_validate(body)
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    sim().db.set_setting("monitor", config.model_dump(mode="json"))
+    sim().commands.put(cmd.ReloadMonitorConfig())
+    return jsonify({"ok": True})
+
+
 @bp.get("/profiles.json")
 def profiles_list():
     app = sim()
@@ -205,7 +225,14 @@ def profile_get(name: str):
     path = loader.find_profile_file(app.config.profiles_dir, name)
     if path is None:
         return jsonify({"error": "not found"}), 404
-    return jsonify({"name": name, "yaml": path.read_text(encoding="utf-8")})
+    text = path.read_text(encoding="utf-8")
+    # Provide both the structured form data and the raw YAML (escape hatch).
+    profile, _ = _validate_yaml(text)
+    return jsonify({
+        "name": name,
+        "yaml": text,
+        "profile": profile.model_dump(mode="json") if profile else None,
+    })
 
 
 def _validate_yaml(text: str) -> tuple[Profile | None, str | None]:
@@ -220,11 +247,21 @@ def _validate_yaml(text: str) -> tuple[Profile | None, str | None]:
         return None, str(e)
 
 
+def _profile_from_body(body: dict) -> tuple[Profile | None, str | None]:
+    """Accept either a structured {profile: {...}} object (from the form) or
+    {yaml: "..."} (the raw editor)."""
+    if "profile" in body:
+        try:
+            return Profile.model_validate(body["profile"]), None
+        except ValidationError as e:
+            return None, str(e)
+    return _validate_yaml(body.get("yaml", ""))
+
+
 @bp.post("/profiles")
 def profile_create():
     app = sim()
-    text = _body().get("yaml", "")
-    profile, error = _validate_yaml(text)
+    profile, error = _profile_from_body(_body())
     if profile and loader.find_profile_file(app.config.profiles_dir, profile.name):
         error = f"profile {profile.name!r} already exists"
     if error:
@@ -240,15 +277,12 @@ def profile_update(name: str):
     path = loader.find_profile_file(app.config.profiles_dir, name)
     if path is None:
         return jsonify({"error": "not found"}), 404
-    text = _body().get("yaml", "")
-    profile, error = _validate_yaml(text)
+    profile, error = _profile_from_body(_body())
     if error:
         return jsonify({"error": error}), 400
+    loader.save_profile(app.config.profiles_dir, profile)
     if profile.name != name:
-        loader.save_profile(app.config.profiles_dir, profile)
-        path.unlink(missing_ok=True)
-    else:
-        path.write_text(text, encoding="utf-8")
+        path.unlink(missing_ok=True)  # renamed: drop the old file
     app.commands.put(cmd.ReloadProfiles())
     return jsonify({"ok": True, "name": profile.name})
 

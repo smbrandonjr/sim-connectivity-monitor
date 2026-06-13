@@ -11,11 +11,13 @@
   import Telemetry from "./views/Telemetry.svelte";
   import Timeline from "./views/Timeline.svelte";
   import Diagnostics from "./views/Diagnostics.svelte";
+  import Monitoring from "./views/Monitoring.svelte";
 
   const TABS = [
     { id: "dashboard", label: "Dashboard", icon: "dashboard-line", view: Dashboard },
     { id: "profiles", label: "Profiles", icon: "settings-3-line", view: Profiles },
     { id: "messages", label: "Messages", icon: "message-2-line", view: Messages },
+    { id: "monitoring", label: "Monitoring", icon: "heart-pulse-line", view: Monitoring },
     { id: "telemetry", label: "Telemetry", icon: "line-chart-line", view: Telemetry },
     { id: "timeline", label: "Timeline", icon: "time-line", view: Timeline },
     { id: "diagnostics", label: "Diagnostics", icon: "terminal-box-line", view: Diagnostics },
