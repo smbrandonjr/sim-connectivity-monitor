@@ -3,9 +3,14 @@ from __future__ import annotations
 import time
 from dataclasses import asdict
 
-from flask import Blueprint, Response, jsonify
+import yaml
+from flask import Blueprint, Response, jsonify, request
+from pydantic import ValidationError
 
 from sim_monitor import __version__
+from sim_monitor.config import loader
+from sim_monitor.config.schema import Profile
+from sim_monitor.core import commands as cmd
 from sim_monitor.core.diagnostics import build_bundle, build_timeline
 from sim_monitor.web.routes._helpers import sim
 
@@ -92,3 +97,175 @@ def bundle():
         mimetype="application/json",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
+
+
+# ── command API (JSON; the SPA posts here) ──────────────────────────────────
+
+
+def _body() -> dict:
+    return request.get_json(silent=True) or {}
+
+
+@bp.post("/cmd/<name>")
+def command(name: str):
+    """Enqueue a daemon command by name. Body is JSON for parameterized ones."""
+    app = sim()
+    body = _body()
+    try:
+        match name:
+            case "reconnect":
+                command_obj = cmd.Reconnect()
+            case "reset-modem":
+                command_obj = cmd.ResetModem()
+            case "monitor-now":
+                command_obj = cmd.RunMonitorNow()
+            case "monitor-pause":
+                command_obj = cmd.PauseMonitor()
+            case "monitor-resume":
+                command_obj = cmd.ResumeMonitor()
+            case "fallback-test":
+                dur = body.get("duration_seconds")
+                command_obj = cmd.StartFallbackTest(
+                    duration_seconds=int(dur) if dur else None
+                )
+            case "fallback-abort":
+                command_obj = cmd.AbortFallbackTest()
+            case "force-profile":
+                command_obj = cmd.ForceProfile(name=str(body["name"]))
+            case "release-force":
+                command_obj = cmd.ReleaseForce()
+            case "reload-profiles":
+                command_obj = cmd.ReloadProfiles()
+            case "run-diagnostics":
+                cmds = tuple(str(c) for c in body.get("commands", []))
+                if any(not c.upper().startswith("AT") for c in cmds):
+                    return jsonify({"error": "all commands must start with AT"}), 400
+                command_obj = cmd.RunDiagnostics(commands=cmds)
+            case "send-sms":
+                command_obj = cmd.SendSms(number=str(body["number"]), text=str(body["text"]))
+            case "delete-sms":
+                command_obj = cmd.DeleteSms(row_id=int(body["row_id"]))
+            case "clear-sms":
+                command_obj = cmd.ClearSms()
+            case "refresh-sms":
+                command_obj = cmd.RefreshSms()
+            case "update-app":
+                return _trigger_update(app)
+            case _:
+                return jsonify({"error": f"unknown command {name!r}"}), 404
+    except (KeyError, ValueError, TypeError) as e:
+        return jsonify({"error": f"invalid arguments: {e}"}), 400
+    app.commands.put(command_obj)
+    return jsonify({"ok": True})
+
+
+@bp.get("/profiles.json")
+def profiles_list():
+    app = sim()
+    snap = app.store.get()
+    profiles, errors = loader.load_profiles(app.config.profiles_dir)
+    return jsonify({
+        "active": snap.active_profile,
+        "forced": snap.forced_profile,
+        "profiles": [
+            {
+                "name": p.name,
+                "description": p.description,
+                "iccid_patterns": p.match.iccid_patterns,
+                "priority": p.match.priority,
+                "contexts": [
+                    {"cid": c.cid, "apn": c.apn, "pdp_type": c.pdp_type, "bearer": c.bearer}
+                    for c in p.pdp_contexts
+                ],
+                "variants": len(p.pdp_variants),
+                "monitor_enabled": p.monitor.enabled,
+            }
+            for p in profiles
+        ],
+        "errors": [{"file": e.path.name, "error": e.error} for e in errors],
+    })
+
+
+@bp.get("/profiles/<name>.json")
+def profile_get(name: str):
+    app = sim()
+    path = loader.find_profile_file(app.config.profiles_dir, name)
+    if path is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"name": name, "yaml": path.read_text(encoding="utf-8")})
+
+
+def _validate_yaml(text: str) -> tuple[Profile | None, str | None]:
+    try:
+        raw = yaml.safe_load(text)
+        if not isinstance(raw, dict):
+            return None, "profile must be a YAML mapping"
+        return Profile.model_validate(raw), None
+    except yaml.YAMLError as e:
+        return None, f"invalid YAML: {e}"
+    except ValidationError as e:
+        return None, str(e)
+
+
+@bp.post("/profiles")
+def profile_create():
+    app = sim()
+    text = _body().get("yaml", "")
+    profile, error = _validate_yaml(text)
+    if profile and loader.find_profile_file(app.config.profiles_dir, profile.name):
+        error = f"profile {profile.name!r} already exists"
+    if error:
+        return jsonify({"error": error}), 400
+    loader.save_profile(app.config.profiles_dir, profile)
+    app.commands.put(cmd.ReloadProfiles())
+    return jsonify({"ok": True, "name": profile.name})
+
+
+@bp.put("/profiles/<name>")
+def profile_update(name: str):
+    app = sim()
+    path = loader.find_profile_file(app.config.profiles_dir, name)
+    if path is None:
+        return jsonify({"error": "not found"}), 404
+    text = _body().get("yaml", "")
+    profile, error = _validate_yaml(text)
+    if error:
+        return jsonify({"error": error}), 400
+    if profile.name != name:
+        loader.save_profile(app.config.profiles_dir, profile)
+        path.unlink(missing_ok=True)
+    else:
+        path.write_text(text, encoding="utf-8")
+    app.commands.put(cmd.ReloadProfiles())
+    return jsonify({"ok": True, "name": profile.name})
+
+
+@bp.delete("/profiles/<name>")
+def profile_delete(name: str):
+    app = sim()
+    if loader.delete_profile(app.config.profiles_dir, name):
+        app.commands.put(cmd.ReloadProfiles())
+        return jsonify({"ok": True})
+    return jsonify({"error": "not found"}), 404
+
+
+def _trigger_update(app):
+    """Pull the latest code and reinstall+restart on the device, detached so it
+    survives the service restart. Lets you update a Pi from its web UI (no SSH)."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    if app.config.simulate:
+        return jsonify({"error": "update is unavailable in simulate mode"}), 400
+    source = Path("/etc/sim-monitor/install-source")
+    if not source.is_file():
+        return jsonify({"error": "install source path unknown; update via git manually"}), 400
+    repo = source.read_text(encoding="utf-8").strip()
+    script = str(Path(repo) / "deploy" / "self-update.sh")
+    if not shutil.which("systemd-run"):
+        return jsonify({"error": "systemd-run not available"}), 400
+    subprocess.Popen(  # noqa: S603 - fixed argv, root-owned device, LAN-only
+        ["systemd-run", "--no-block", "--unit=sim-monitor-selfupdate", "bash", script, repo]
+    )
+    return jsonify({"ok": True, "message": "update started; the service will restart shortly"})

@@ -268,6 +268,61 @@ class TestMessages:
         assert any(m["body"] == "field test message" for m in data)
 
 
+class TestJsonCommandApi:
+    def test_simple_command(self, sim, client):
+        resp = client.post("/api/cmd/reconnect")
+        assert resp.status_code == 200 and resp.get_json()["ok"] is True
+        assert cmd.Reconnect() in sim.commands.drain()
+
+    def test_fallback_test_with_duration(self, sim, client):
+        client.post("/api/cmd/fallback-test", json={"duration_seconds": 120})
+        assert cmd.StartFallbackTest(duration_seconds=120) in sim.commands.drain()
+
+    def test_send_sms(self, sim, client):
+        client.post("/api/cmd/send-sms", json={"number": "+1", "text": "hi"})
+        assert cmd.SendSms(number="+1", text="hi") in sim.commands.drain()
+
+    def test_run_diagnostics_rejects_non_at(self, sim, client):
+        resp = client.post("/api/cmd/run-diagnostics", json={"commands": ["rm -rf /"]})
+        assert resp.status_code == 400
+
+    def test_unknown_command_404(self, sim, client):
+        assert client.post("/api/cmd/nope").status_code == 404
+
+    def test_force_profile_missing_arg_400(self, sim, client):
+        assert client.post("/api/cmd/force-profile", json={}).status_code == 400
+
+    def test_update_unavailable_in_simulate(self, sim, client):
+        resp = client.post("/api/cmd/update-app")
+        assert resp.status_code == 400
+        assert "simulate" in resp.get_json()["error"]
+
+
+class TestJsonProfileApi:
+    def test_list(self, sim, client):
+        data = client.get("/api/profiles.json").get_json()
+        assert any(p["name"] == "web-test" for p in data["profiles"])
+
+    def test_get_raw(self, sim, client):
+        data = client.get("/api/profiles/web-test.json").get_json()
+        assert "pdp_contexts" in data["yaml"]
+
+    def test_create_update_delete(self, sim, client):
+        new_yaml = (
+            "name: created\nmatch: {iccid_patterns: ['8944111*'], priority: 10}\n"
+            "pdp_contexts: [{cid: 1, apn: hologram, bearer: true}]\n"
+        )
+        assert client.post("/api/profiles", json={"yaml": new_yaml}).status_code == 200
+        edited = new_yaml.replace("apn: hologram", "apn: hologram2")
+        assert client.put("/api/profiles/created", json={"yaml": edited}).status_code == 200
+        assert client.delete("/api/profiles/created").status_code == 200
+        profiles, _ = load_profiles(sim.config.profiles_dir)
+        assert {p.name for p in profiles} == {"web-test"}
+
+    def test_create_invalid_400(self, sim, client):
+        assert client.post("/api/profiles", json={"yaml": "name: x"}).status_code == 400
+
+
 class TestLogs:
     def test_events_page(self, sim, client):
         tick_until_connected(sim)

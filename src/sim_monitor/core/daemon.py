@@ -329,6 +329,31 @@ class Daemon:
         self._sms_pending = True
         self.events.info("sms", "cleared all messages on the modem")
 
+    def _log_ota_context(self, when: str) -> None:
+        """Capture the observable network context around an OTA/swap. The OTA
+        applet's SIM<->network exchange is below the AT interface, but operator,
+        registration, signal, and serving cell give useful before/after detail."""
+        if self.driver is None:
+            return
+        parts: list[str] = []
+        try:
+            op = self.driver.get_operator()
+            if op:
+                parts.append(f"operator={op}")
+        except ModemError:
+            pass
+        try:
+            t = self.driver.get_telemetry()
+            for k in ("rat", "band", "rsrp", "rsrq", "sinr", "cell_id", "tac",
+                      "operator_numeric"):
+                if t.get(k) is not None:
+                    parts.append(f"{k}={t[k]}")
+        except ModemError:
+            pass
+        self.events.info(
+            "ota", f"network context {when}: " + (", ".join(parts) or "unavailable")
+        )
+
     def _record_identity(self, reason: str) -> None:
         snap = self.store.get()
         key = (snap.iccid, snap.imsi, snap.imei)
@@ -533,6 +558,7 @@ class Daemon:
                 f"ICCID {snapshot.iccid}->{sim.iccid}, IMSI {snapshot.imsi}->{sim.imsi}; "
                 "re-evaluating profile and re-attaching",
             )
+            self._log_ota_context("at swap")
             self._sim_refresh_pending = False
             self._safe_disconnect()
             self.active_profile = None

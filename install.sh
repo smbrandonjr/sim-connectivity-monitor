@@ -23,6 +23,10 @@ apt-get install -y -qq python3 python3-venv network-manager modemmanager > /dev/
 say "Creating directories"
 mkdir -p "$APP_DIR" "$ETC_DIR/profiles.d" "$VAR_DIR"
 
+# Record where we were installed from so the web UI's "Update" action can
+# pull + reinstall this same checkout without anyone SSHing in.
+echo "$REPO_DIR" > "$ETC_DIR/install-source"
+
 say "Setting up Python venv in $APP_DIR/venv"
 if [[ ! -x "$APP_DIR/venv/bin/python" ]]; then
     python3 -m venv "$APP_DIR/venv"
