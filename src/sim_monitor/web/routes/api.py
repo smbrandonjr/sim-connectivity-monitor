@@ -172,8 +172,6 @@ def command(name: str):
                 command_obj = cmd.MarkSmsRead()
             case "set-sim-name":
                 command_obj = cmd.SetSimName(name=str(body.get("name", "")))
-            case "update-app":
-                return _trigger_update(app)
             case _:
                 return jsonify({"error": f"unknown command {name!r}"}), 404
     except (KeyError, ValueError, TypeError) as e:
@@ -362,32 +360,3 @@ def profile_delete(name: str):
         app.commands.put(cmd.ReloadProfiles())
         return jsonify({"ok": True})
     return jsonify({"error": "not found"}), 404
-
-
-def _trigger_update(app):
-    """Pull the latest code and reinstall+restart on the device, detached so it
-    survives the service restart. Lets you update a Pi from its web UI (no SSH)."""
-    import shutil
-    import subprocess
-    from pathlib import Path
-
-    if app.config.simulate:
-        return jsonify({"error": "update is unavailable in simulate mode"}), 400
-    source = Path("/etc/sim-monitor/install-source")
-    if not source.is_file():
-        return jsonify({"error": "install source path unknown; update via git manually"}), 400
-    repo = source.read_text(encoding="utf-8").strip()
-    script = str(Path(repo) / "deploy" / "self-update.sh")
-    if not shutil.which("systemd-run"):
-        return jsonify({"error": "systemd-run not available"}), 400
-    # Auto-named transient unit (no fixed name to collide on repeated updates);
-    # logs are visible via: journalctl -t sim-monitor-update
-    subprocess.Popen(  # noqa: S603 - fixed argv, root-owned device, LAN-only
-        ["systemd-run", "--no-block", "--collect",
-         "--property=SyslogIdentifier=sim-monitor-update", "bash", script, repo]
-    )
-    return jsonify({
-        "ok": True,
-        "message": "Update started — the service will restart in ~30–90s. "
-                   "Logs: journalctl -t sim-monitor-update",
-    })

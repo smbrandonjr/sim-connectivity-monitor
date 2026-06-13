@@ -4,7 +4,6 @@
   import { stateClass } from "./lib/format";
   import { api } from "./lib/api";
   import { toast } from "./lib/toast";
-  import { confirmDialog } from "./lib/confirm";
   import Toasts from "./lib/Toasts.svelte";
   import ConfirmModal from "./lib/ConfirmModal.svelte";
   import Dashboard from "./views/Dashboard.svelte";
@@ -49,17 +48,6 @@
   function onToggleTheme() {
     toggleTheme();
     theme = currentTheme();
-  }
-
-  async function update() {
-    const ok = await confirmDialog({
-      title: "Update this device",
-      message: "Pull the latest code, reinstall, and restart the service on this device? "
-        + "It will be briefly offline while it restarts.",
-      confirmLabel: "Update & restart",
-      danger: true,
-    });
-    if (ok) await api.cmd("update-app");
   }
 
   onMount(() => {
@@ -120,9 +108,6 @@
   {/if}
   <button class="ui-btn ui-btn-sm" title="Toggle theme" on:click={onToggleTheme}>
     <i class="ri-{theme === 'dark' ? 'sun' : 'moon'}-line"></i>
-  </button>
-  <button class="ui-btn ui-btn-sm" title="Update this device" on:click={update}>
-    <i class="ri-download-cloud-2-line"></i>
   </button>
 </nav>
 

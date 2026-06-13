@@ -16,8 +16,9 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# SKIP_APT=1 (set by self-update) skips the package step so updates are fast and
-# don't pull apt data over a metered cellular link. First install must run it.
+# SKIP_APT=1 skips the OS-package step for a faster re-install that doesn't pull
+# apt data over a metered cellular link (deps are already present). The first
+# install must run it. Example:  SKIP_APT=1 sudo ./install.sh
 if [[ "${SKIP_APT:-0}" == "1" ]]; then
     say "Skipping OS package step (SKIP_APT=1)"
 else
@@ -28,10 +29,6 @@ fi
 
 say "Creating directories"
 mkdir -p "$APP_DIR" "$ETC_DIR/profiles.d" "$VAR_DIR"
-
-# Record where we were installed from so the web UI's "Update" action can
-# pull + reinstall this same checkout without anyone SSHing in.
-echo "$REPO_DIR" > "$ETC_DIR/install-source"
 
 say "Setting up Python venv in $APP_DIR/venv"
 if [[ ! -x "$APP_DIR/venv/bin/python" ]]; then

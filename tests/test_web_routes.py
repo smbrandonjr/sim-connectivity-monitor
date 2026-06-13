@@ -193,10 +193,9 @@ class TestJsonCommandApi:
     def test_force_profile_missing_arg_400(self, sim, client):
         assert client.post("/api/cmd/force-profile", json={}).status_code == 400
 
-    def test_update_unavailable_in_simulate(self, sim, client):
-        resp = client.post("/api/cmd/update-app")
-        assert resp.status_code == 400
-        assert "simulate" in resp.get_json()["error"]
+    def test_update_command_removed(self, sim, client):
+        # The in-UI device-update feature was removed; updates are git+install.
+        assert client.post("/api/cmd/update-app").status_code == 404
 
 
 class TestMonitorConfigApi:
