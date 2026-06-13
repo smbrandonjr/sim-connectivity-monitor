@@ -33,8 +33,9 @@ class NetworkBackend(ABC):
         """Is a modem visible to the system (mmcli -L)?"""
 
     @abstractmethod
-    def configure_connection(self, profile: Profile) -> None:
-        """Create/update the NM GSM connection from the profile's bearer context."""
+    def configure_connection(self, profile: Profile, bearer) -> None:
+        """Create/update the NM GSM connection from the chosen bearer context
+        (a PdpContext; the daemon picks it from the active profile's variant)."""
 
     @abstractmethod
     def connect(self) -> None:

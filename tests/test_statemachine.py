@@ -273,6 +273,81 @@ class TestOtaSwap:
         assert any(row["reason"] == "ota-swap" for row in history)
 
 
+VARIANT_PROFILE = Profile.model_validate(
+    {
+        "name": "verizon-direct",
+        "match": {"iccid_patterns": ["891480*"], "priority": 10},
+        "pdp_contexts": [{"cid": 1, "apn": "vzwinternet", "bearer": True}],
+        "pdp_variants": [
+            {
+                "name": "plan-b",
+                "pdp_contexts": [{"cid": 1, "apn": "we01.vzwstatic", "bearer": True}],
+            },
+        ],
+    }
+)
+
+
+class TestPdpVariants:
+    def test_first_variant_used_when_it_connects(self, tmp_path):
+        h = Harness(tmp_path, profiles=[VARIANT_PROFILE])
+        h.driver.iccid = "8914800000000000123"
+        h.run_until(State.CONNECTED)
+        assert h.backend.configured_bearer.apn == "vzwinternet"
+
+    def test_falls_through_to_second_variant(self, tmp_path):
+        h = Harness(tmp_path, profiles=[VARIANT_PROFILE])
+        h.driver.iccid = "8914800000000000123"
+
+        # Fail connect while APN is the first variant; succeed on the second.
+        def maybe_fail():
+            h.backend.fail_connect = h.backend.configured_bearer.apn == "vzwinternet"
+
+        original_connect = h.backend.connect
+        def patched_connect():
+            maybe_fail()
+            return original_connect()
+        h.backend.connect = patched_connect
+
+        h.run_until(State.CONNECTED, max_ticks=30)
+        assert h.backend.configured_bearer.apn == "we01.vzwstatic"
+        # variant cycling should not have burned a supervisor failure
+        assert h.daemon.supervisor.failures == 0
+
+
+class TestLastDitchFallback:
+    def _profile(self):
+        return Profile.model_validate({
+            "name": "strict", "match": {"iccid_patterns": ["8944500*"], "priority": 10},
+            "pdp_contexts": [{"cid": 1, "apn": "broken.apn", "bearer": True}],
+        })
+
+    def _run_until_parked_and_degraded(self, h, max_ticks=120):
+        for _ in range(max_ticks):
+            h.tick(advance=400)
+            if h.daemon.supervisor.parked and h.daemon.state is State.DEGRADED:
+                return
+        raise AssertionError("supervisor never parked in DEGRADED")
+
+    def test_falls_back_to_builtin_default_after_ladder(self, tmp_path):
+        h = Harness(tmp_path, profiles=[self._profile()])
+        h.backend.fail_connect = True
+        self._run_until_parked_and_degraded(h)
+        h.backend.fail_connect = False
+        h.tick()  # DEGRADED notices parked -> switch to builtin default
+        assert h.daemon.active_profile.name == "builtin-default"
+        h.run_until(State.CONNECTED, max_ticks=6)
+        assert h.backend.configured_bearer.apn == "hologram"
+
+    def test_no_fallback_when_disabled(self, tmp_path):
+        h = Harness(tmp_path, profiles=[self._profile()])
+        h.daemon.config.daemon.fallback_to_default_profile = False
+        h.backend.fail_connect = True
+        self._run_until_parked_and_degraded(h)
+        h.tick()
+        assert h.daemon.active_profile.name == "strict"  # never switched
+
+
 class TestRecovery:
     def test_connect_failure_walks_ladder(self, harness):
         harness.backend.fail_connect = True

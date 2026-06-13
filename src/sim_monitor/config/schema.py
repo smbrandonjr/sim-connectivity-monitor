@@ -97,11 +97,43 @@ class FallbackTestConfig(StrictModel):
     airplane_seconds: int = Field(default=900, ge=10, le=7200)
 
 
+def _validate_context_set(contexts: list[PdpContext], label: str) -> None:
+    """Each context set must have unique CIDs and exactly one bearer (a single
+    context is auto-promoted). Mutates `contexts` to set the implicit bearer."""
+    cids = [c.cid for c in contexts]
+    if len(set(cids)) != len(cids):
+        raise ValueError(f"{label}: duplicate PDP context cids: {cids}")
+    bearers = [c for c in contexts if c.bearer]
+    if not bearers and len(contexts) == 1:
+        contexts[0].bearer = True
+        bearers = contexts
+    if len(bearers) != 1:
+        raise ValueError(f"{label}: exactly one PDP context must have bearer: true")
+
+
+class PdpVariant(StrictModel):
+    """An alternative PDP-context set. When a profile lists variants, the daemon
+    tries each in order until one attaches + gets an IP. This covers cases where
+    the right context can't be known from the ICCID alone — e.g. Verizon-direct
+    SIMs whose PDP context depends on the Hologram data plan."""
+
+    name: str = ""
+    pdp_contexts: list[PdpContext] = Field(min_length=1, max_length=MAX_PDP_CONTEXTS)
+
+    @model_validator(mode="after")
+    def _validate(self) -> PdpVariant:
+        _validate_context_set(self.pdp_contexts, f"variant {self.name or '?'}")
+        return self
+
+
 class Profile(StrictModel):
     name: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
     description: str = ""
     match: MatchSpec = Field(default_factory=MatchSpec)
     pdp_contexts: list[PdpContext] = Field(min_length=1, max_length=MAX_PDP_CONTEXTS)
+    # Optional alternative context sets tried (after pdp_contexts) until one
+    # connects. Empty = just pdp_contexts.
+    pdp_variants: list[PdpVariant] = Field(default_factory=list)
     at_init: list[str] = Field(default_factory=list)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     monitor: MonitorConfig = Field(default_factory=MonitorConfig)
@@ -109,21 +141,19 @@ class Profile(StrictModel):
 
     @model_validator(mode="after")
     def _validate_contexts(self) -> Profile:
-        cids = [c.cid for c in self.pdp_contexts]
-        if len(set(cids)) != len(cids):
-            raise ValueError(f"duplicate PDP context cids: {cids}")
-        bearers = [c for c in self.pdp_contexts if c.bearer]
-        if not bearers and len(self.pdp_contexts) == 1:
-            # A single context is unambiguously the bearer.
-            self.pdp_contexts[0].bearer = True
-            bearers = [self.pdp_contexts[0]]
-        if len(bearers) != 1:
-            raise ValueError("exactly one PDP context must have bearer: true")
+        _validate_context_set(self.pdp_contexts, "pdp_contexts")
         return self
 
     @property
     def bearer_context(self) -> PdpContext:
         return next(c for c in self.pdp_contexts if c.bearer)
+
+    def context_sets(self) -> list[tuple[str, list[PdpContext]]]:
+        """All PDP-context sets to try, in order: the primary then each variant."""
+        sets = [("default", self.pdp_contexts)]
+        for i, v in enumerate(self.pdp_variants):
+            sets.append((v.name or f"variant-{i + 1}", v.pdp_contexts))
+        return sets
 
 
 class WebConfig(StrictModel):
@@ -145,6 +175,11 @@ class DaemonConfig(StrictModel):
     # steps in. Roaming SIMs (Hologram) may scan carriers for minutes,
     # especially after a modem reset -- interrupting makes it WORSE.
     registration_timeout_seconds: int = Field(default=300, ge=30)
+    # After the recovery ladder is exhausted on the matched profile, try a
+    # built-in default (APN "hologram", IPv4) as a last-ditch catch-all so a
+    # device is never stranded by a missing/wrong profile. Set false for strict
+    # per-SIM control.
+    fallback_to_default_profile: bool = True
 
 
 class AppConfig(StrictModel):

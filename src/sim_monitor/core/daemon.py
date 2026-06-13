@@ -35,6 +35,19 @@ log = logging.getLogger(__name__)
 
 S = State  # short alias for the state handlers
 
+# Last-ditch catch-all used when the matched profile can't connect after the
+# recovery ladder is exhausted (daemon.fallback_to_default_profile). A plain
+# IPv4 "hologram" APN gets most Hologram SIMs online so a device is never
+# stranded by a missing or wrong profile.
+BUILTIN_DEFAULT = Profile.model_validate(
+    {
+        "name": "builtin-default",
+        "description": "Built-in last-ditch default (APN hologram, IPv4)",
+        "match": {"iccid_patterns": ["*"], "priority": 100000},
+        "pdp_contexts": [{"cid": 1, "apn": "hologram", "pdp_type": "IPv4", "bearer": True}],
+    }
+)
+
 
 class Daemon:
     def __init__(
@@ -75,6 +88,8 @@ class Daemon:
         self._sms_pending = False           # a +CMTI was seen (Phase 2 fetches)
         self._last_identity: tuple | None = None  # (iccid, imsi, imei) last recorded
         self._registration: str | None = None
+        self._variant_index = 0             # which PDP-context variant we're trying
+        self._fallback_active = False       # on the built-in last-ditch default
 
         store.update(profile_count=len(profiles))
 
@@ -308,16 +323,27 @@ class Daemon:
                 f"profile {profile.name!r} selected for ICCID {snapshot.iccid}"
                 + (" (forced)" if self.forced_profile else ""),
             )
+            self._variant_index = 0       # fresh profile: start at its first variant
+            self._fallback_active = False
         self.active_profile = profile
         self._go(S.CONFIGURING, active_profile=profile.name, last_error=None)
 
     def _state_configuring(self) -> None:
         assert self.driver is not None and self.active_profile is not None
         profile = self.active_profile
+        sets = profile.context_sets()
+        if self._variant_index >= len(sets):
+            self._variant_index = 0
+        variant_label, contexts = sets[self._variant_index]
+        bearer = next(c for c in contexts if c.bearer)
+        if len(sets) > 1:
+            self.events.info(
+                "pdp", f"using PDP variant '{variant_label}' ({bearer.apn})"
+            )
         try:
             if profile.at_init:
                 self.driver.run_init_commands(profile.at_init)
-            actions = reconcile(self.driver.get_pdp_contexts(), profile.pdp_contexts)
+            actions = reconcile(self.driver.get_pdp_contexts(), contexts)
             for action in actions:
                 match action:
                     case DeleteContext(cid=cid):
@@ -328,7 +354,7 @@ class Daemon:
                         self.events.info(
                             "pdp", f"defined PDP context cid={ctx.cid} apn={ctx.apn}"
                         )
-            self.backend.configure_connection(profile)
+            self.backend.configure_connection(profile, bearer)
         except (ModemError, BackendError) as e:
             self._fail(f"configuration failed: {e}")
             return
@@ -353,7 +379,7 @@ class Daemon:
             try:
                 self.backend.connect()
             except BackendError as e:
-                self._fail(f"connect failed: {e}")
+                self._advance_variant_or_fail(f"connect failed: {e}")
                 return
             conn = self.backend.get_connection_state()
         if conn.active and conn.ip_address:
@@ -364,6 +390,7 @@ class Daemon:
                 self.backend.assert_routing(self.active_profile)
             except BackendError as e:
                 self.events.warning("routing", f"could not assert routing: {e}")
+            self._record_identity("connected")
             self._go(
                 S.CONNECTED,
                 interface=conn.interface,
@@ -379,7 +406,26 @@ class Daemon:
                 f"{self.config.daemon.registration_timeout_seconds}s",
             )
         if self._connect_deadline and self.clock() > self._connect_deadline:
-            self._fail("timed out waiting for network registration / IP address")
+            self._advance_variant_or_fail(
+                "timed out waiting for network registration / IP address"
+            )
+
+    def _advance_variant_or_fail(self, reason: str) -> None:
+        """On a connect/registration failure, try the profile's next PDP variant
+        before escalating to the supervisor ladder. Variants are cheap to try and
+        often the difference between a working and non-working data plan."""
+        sets = self.active_profile.context_sets() if self.active_profile else [("", [])]
+        if self._variant_index + 1 < len(sets):
+            self._variant_index += 1
+            label = sets[self._variant_index][0]
+            self.events.info(
+                "pdp", f"{reason}; trying next PDP variant '{label}'"
+            )
+            self._safe_disconnect()
+            self._go(S.CONFIGURING)
+        else:
+            self._variant_index = 0  # next attempt starts from the top
+            self._fail(reason)
 
     def _state_connected(self) -> None:
         assert self.driver is not None and self.active_profile is not None
@@ -463,6 +509,28 @@ class Daemon:
         )
 
     def _state_degraded(self) -> None:
+        # Last-ditch: once the ladder is exhausted on the matched profile, fall
+        # back to the built-in default before parking forever (the user's
+        # "catch-all try"). Only switch once, and never if already on it.
+        if (
+            self.config.daemon.fallback_to_default_profile
+            and self.supervisor.parked
+            and not self._fallback_active
+            and self.active_profile is not None
+            and self.active_profile.name != BUILTIN_DEFAULT.name
+        ):
+            self.events.warning(
+                "profile",
+                f"profile {self.active_profile.name!r} exhausted recovery; "
+                "falling back to built-in default (APN hologram)",
+            )
+            self._fallback_active = True
+            self.active_profile = BUILTIN_DEFAULT
+            self._variant_index = 0
+            self.supervisor.reset()
+            self.store.update(active_profile=BUILTIN_DEFAULT.name)
+            self._go(S.CONFIGURING)
+            return
         planned = self.supervisor.due(self.clock())
         if planned is None:
             return
@@ -608,6 +676,8 @@ class Daemon:
         self._sim_refresh_pending = False
         self._registration = None
         self._last_identity = None
+        self._variant_index = 0
+        self._fallback_active = False
         self._go(
             S.NO_MODEM,
             sim_present=False, iccid=None, imsi=None,

@@ -12,6 +12,9 @@ daemon:
   # Roaming SIMs (Hologram) can take minutes to register, especially after a
   # modem reset -- the daemon waits this long before recovery kicks in.
   registration_timeout_seconds: 300
+  # After the recovery ladder is exhausted on the matched profile, try a
+  # built-in default (APN "hologram") as a last-ditch catch-all. false = strict.
+  fallback_to_default_profile: true
 
 log_level: INFO
 

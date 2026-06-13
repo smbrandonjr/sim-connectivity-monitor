@@ -44,8 +44,8 @@ class RealBackend(NetworkBackend):
             log.warning("mmcli unavailable: %s", e)
             return False
 
-    def configure_connection(self, profile: Profile) -> None:
-        bearer = profile.bearer_context
+    def configure_connection(self, profile: Profile, bearer=None) -> None:
+        bearer = bearer or profile.bearer_context
         self.nmcli.ensure_gsm_connection(
             apn=bearer.apn,
             username=bearer.username,

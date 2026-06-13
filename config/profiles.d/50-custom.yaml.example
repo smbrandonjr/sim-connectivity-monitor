@@ -32,6 +32,16 @@ pdp_contexts:
     pdp_type: IPv4v6
     auth: none
 
+# Optional: alternative PDP-context sets, tried in order if the primary
+# pdp_contexts above doesn't attach + get an IP. Use this when the right
+# context can't be known from the ICCID alone -- e.g. Verizon-direct SIMs
+# whose context depends on the Hologram data plan. The daemon settles on the
+# first set that connects.
+pdp_variants:
+  - name: plan-b
+    pdp_contexts:
+      - { cid: 1, apn: we01.vzwstatic, pdp_type: IPv4, bearer: true }
+
 # Raw AT commands sent before connecting (vendor-specific tweaks, band locks, etc.)
 at_init:
   - 'AT+QCFG="nwscanmode",0'

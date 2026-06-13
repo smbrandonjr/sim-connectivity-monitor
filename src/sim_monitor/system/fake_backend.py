@@ -16,6 +16,7 @@ class FakeBackend(NetworkBackend):
     def __init__(self, driver: FakeModemDriver | None = None) -> None:
         self.driver = driver  # connect honors airplane/SIM state when provided
         self.configured_profile: Profile | None = None
+        self.configured_bearer = None
         self.connected = False
         self.interface = "wwan0"
         self.ip_address = "10.170.42.7"
@@ -33,10 +34,11 @@ class FakeBackend(NetworkBackend):
     def modem_available(self) -> bool:
         return self.driver is not None
 
-    def configure_connection(self, profile: Profile) -> None:
+    def configure_connection(self, profile: Profile, bearer=None) -> None:
         if self.fail_configure:
             raise BackendError("simulated nmcli modify failure")
         self.configured_profile = profile
+        self.configured_bearer = bearer or profile.bearer_context
 
     def connect(self) -> None:
         if self.fail_connect:
