@@ -48,27 +48,32 @@ class HttpMonitor:
                 return
             if forced:
                 self.trigger.clear()
-            profile = self.get_profile()
-            if profile is None or profile.monitor.request is None:
-                if forced:
-                    self.db.add_monitor_result(
-                        url="", status_code=None, latency_ms=None, ok=False,
-                        error="no monitor request configured for the active profile",
-                    )
-                continue
-            now = time.monotonic()
-            scheduled = (
-                profile.monitor.enabled
-                and (self._next_due is None or now >= self._next_due)
-            )
-            if not (forced or scheduled):
-                continue
-            snapshot = self.store.get()
-            connected = snapshot.state is State.CONNECTED
-            if not connected and not forced and not profile.monitor.send_when_degraded:
-                continue  # don't reschedule; fire as soon as we're connected again
-            self._next_due = now + profile.monitor.interval_seconds
-            self.probe(profile)
+            self._iteration(forced)
+
+    def _iteration(self, forced: bool) -> None:
+        profile = self.get_profile()
+        if profile is None or profile.monitor.request is None:
+            if forced:
+                self.db.add_monitor_result(
+                    url="", status_code=None, latency_ms=None, ok=False,
+                    error="no monitor request configured for the active profile",
+                )
+            return
+        now = time.monotonic()
+        scheduled = (
+            profile.monitor.enabled
+            and (self._next_due is None or now >= self._next_due)
+        )
+        if not (forced or scheduled):
+            return
+        snapshot = self.store.get()
+        if snapshot.monitor_paused and not forced:
+            return  # paused: hold the schedule; resumes where it left off
+        connected = snapshot.state is State.CONNECTED
+        if not connected and not forced and not profile.monitor.send_when_degraded:
+            return  # don't reschedule; fire as soon as we're connected again
+        self._next_due = now + profile.monitor.interval_seconds
+        self.probe(profile)
 
     def probe(self, profile: Profile) -> bool:
         """Send one monitor request and record the result. Returns success.

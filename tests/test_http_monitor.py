@@ -161,3 +161,27 @@ def test_connected_probe_reports_connected_status(env):
 
 def test_send_when_degraded_default_on():
     assert PROFILE.monitor.send_when_degraded is True
+
+
+class TestPause:
+    def test_paused_holds_scheduled_sends(self, env):
+        monitor, session, _ = env
+        monitor.get_profile = lambda: PROFILE
+        monitor.store.update(monitor_paused=True)
+        monitor._iteration(forced=False)
+        assert session.calls == []
+        assert monitor._next_due is None  # schedule held, fires promptly on resume
+
+    def test_manual_send_works_while_paused(self, env):
+        monitor, session, _ = env
+        monitor.store.update(monitor_paused=True)
+        monitor._iteration(forced=True)
+        assert len(session.calls) == 1
+
+    def test_resume_fires_on_next_iteration(self, env):
+        monitor, session, _ = env
+        monitor.store.update(monitor_paused=True)
+        monitor._iteration(forced=False)
+        monitor.store.update(monitor_paused=False)
+        monitor._iteration(forced=False)
+        assert len(session.calls) == 1

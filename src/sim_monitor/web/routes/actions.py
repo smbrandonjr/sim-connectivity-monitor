@@ -25,7 +25,21 @@ def reset_modem():
 @bp.post("/monitor-now")
 def monitor_now():
     sim().commands.put(cmd.RunMonitorNow())
-    flash("monitor probe requested", "ok")
+    flash("heartbeat send requested", "ok")
+    return redirect(url_for("status.dashboard"))
+
+
+@bp.post("/monitor-pause")
+def monitor_pause():
+    sim().commands.put(cmd.PauseMonitor())
+    flash("pausing scheduled heartbeats", "ok")
+    return redirect(url_for("status.dashboard"))
+
+
+@bp.post("/monitor-resume")
+def monitor_resume():
+    sim().commands.put(cmd.ResumeMonitor())
+    flash("resuming scheduled heartbeats", "ok")
     return redirect(url_for("status.dashboard"))
 
 

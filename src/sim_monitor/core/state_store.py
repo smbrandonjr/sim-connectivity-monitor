@@ -92,6 +92,7 @@ class Snapshot:
     last_error: str | None = None
     fallback: FallbackStatus = field(default_factory=FallbackStatus)
     diagnostics: DiagnosticsReport | None = None
+    monitor_paused: bool = False  # runtime-only; resets on service restart
     updated_at: float = field(default_factory=time.time)
 
     def placeholder_context(self) -> dict[str, Any]:

@@ -79,6 +79,8 @@ class TestActions:
             ("/actions/reconnect", cmd.Reconnect()),
             ("/actions/reset-modem", cmd.ResetModem()),
             ("/actions/monitor-now", cmd.RunMonitorNow()),
+            ("/actions/monitor-pause", cmd.PauseMonitor()),
+            ("/actions/monitor-resume", cmd.ResumeMonitor()),
             ("/actions/fallback-abort", cmd.AbortFallbackTest()),
         ],
     )

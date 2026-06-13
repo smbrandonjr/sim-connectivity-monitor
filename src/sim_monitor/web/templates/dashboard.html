@@ -42,7 +42,9 @@
     </dl>
   </section>
   <section class="card">
-    <h2>Heartbeat</h2>
+    <h2>Heartbeat
+      {% if snap.monitor_paused %}<span class="badge badge-warn">paused</span>{% endif %}
+    </h2>
     {% if last_monitor %}
     <dl>
       <dt>Last result</dt><dd data-f="monitor_ok">{{ "ok" if last_monitor.ok else "FAILED" }}</dd>
@@ -74,8 +76,17 @@
       <button type="submit" class="danger" title="Reboot the modem itself — it re-enumerates and reconnects (~1 min)">Reset modem</button>
     </form>
     <form method="post" action="{{ url_for('actions.monitor_now') }}">
-      <button type="submit" title="Send the profile's heartbeat request right now">Send heartbeat now</button>
+      <button type="submit" title="Send the profile's heartbeat request right now (works while paused too)">Send heartbeat now</button>
     </form>
+    {% if snap.monitor_paused %}
+    <form method="post" action="{{ url_for('actions.monitor_resume') }}">
+      <button type="submit" title="Resume the heartbeat schedule">Resume heartbeats</button>
+    </form>
+    {% else %}
+    <form method="post" action="{{ url_for('actions.monitor_pause') }}">
+      <button type="submit" title="Hold scheduled heartbeats until resumed (or service restart); manual sends still work">Pause heartbeats</button>
+    </form>
+    {% endif %}
   </div>
   <div class="actions" style="margin-top:10px">
     <form method="post" action="{{ url_for('actions.fallback_test') }}" class="inline">

@@ -155,6 +155,12 @@ class Daemon:
                 self.monitor_trigger.set()
             case cmd.RunDiagnostics(commands=requested):
                 self._run_diagnostics(requested)
+            case cmd.PauseMonitor():
+                self.store.update(monitor_paused=True)
+                self.events.info("monitor", "heartbeats paused (manual sends still work)")
+            case cmd.ResumeMonitor():
+                self.store.update(monitor_paused=False)
+                self.events.info("monitor", "heartbeats resumed")
             case cmd.ReloadProfiles():
                 self._reload_profiles()
 

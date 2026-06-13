@@ -51,6 +51,16 @@ class RunDiagnostics:
 
 
 @dataclass(frozen=True)
+class PauseMonitor:
+    pass
+
+
+@dataclass(frozen=True)
+class ResumeMonitor:
+    pass
+
+
+@dataclass(frozen=True)
 class ReloadProfiles:
     pass
 
@@ -64,6 +74,8 @@ Command = (
     | AbortFallbackTest
     | RunMonitorNow
     | RunDiagnostics
+    | PauseMonitor
+    | ResumeMonitor
     | ReloadProfiles
 )
 
