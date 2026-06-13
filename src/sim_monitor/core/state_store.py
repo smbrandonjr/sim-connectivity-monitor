@@ -96,6 +96,7 @@ class Snapshot:
     diagnostics: DiagnosticsReport | None = None
     monitor_paused: bool = False  # runtime-only; resets on service restart
     sms_unread: int = 0
+    telemetry: dict = field(default_factory=dict)  # latest deep link metrics
     updated_at: float = field(default_factory=time.time)
 
     def placeholder_context(self) -> dict[str, Any]:

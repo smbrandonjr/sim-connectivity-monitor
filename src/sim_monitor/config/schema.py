@@ -180,6 +180,9 @@ class DaemonConfig(StrictModel):
     # device is never stranded by a missing/wrong profile. Set false for strict
     # per-SIM control.
     fallback_to_default_profile: bool = True
+    # How often to capture deep link telemetry (signal/serving-cell) for the
+    # history charts, while connected.
+    telemetry_interval_seconds: int = Field(default=30, ge=5)
 
 
 class AppConfig(StrictModel):

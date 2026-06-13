@@ -214,6 +214,81 @@ def classify_urc(line: str) -> tuple[str, dict]:
     return "unknown", {"raw": line}
 
 
+def parse_qcsq(lines: list[str]) -> dict | None:
+    """Quectel +QCSQ: "<sysmode>",<rssi>,<rsrp>,<sinr>,<rsrq> (LTE), or
+    +QCSQ: "NOSERVICE". Values are dBm (sinr is Quectel's raw index)."""
+    for line in lines:
+        m = re.match(r'\+QCSQ:\s*"([^"]*)"(?:\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,'
+                     r'\s*(-?\d+)\s*,\s*(-?\d+))?', line)
+        if m:
+            if m.group(2) is None:
+                return {"rat": m.group(1), "rssi": None, "rsrp": None,
+                        "sinr": None, "rsrq": None}
+            return {
+                "rat": m.group(1),
+                "rssi": int(m.group(2)),
+                "rsrp": int(m.group(3)),
+                "sinr": int(m.group(4)),
+                "rsrq": int(m.group(5)),
+            }
+    return None
+
+
+def parse_qeng_servingcell(lines: list[str]) -> dict | None:
+    """Quectel AT+QENG="servingcell" for LTE. Tolerant token parse."""
+    for line in lines:
+        if not line.startswith("+QENG:") or "servingcell" not in line:
+            continue
+        body = line.split(":", 1)[1]
+        toks = [t.strip().strip('"') for t in body.split(",")]
+        # toks: servingcell,state,LTE,FDD,MCC,MNC,cellID,PCID,EARFCN,band,
+        #       ULbw,DLbw,TAC,RSRP,RSRQ,RSSI,SINR,...
+        if len(toks) < 17 or toks[2].upper() != "LTE":
+            return {"rat": toks[2] if len(toks) > 2 else None, "state": toks[1]
+                    if len(toks) > 1 else None}
+
+        def _int(s, base=10):
+            try:
+                return int(s, base)
+            except (ValueError, TypeError):
+                return None
+
+        return {
+            "rat": "LTE",
+            "state": toks[1],
+            "mcc": _int(toks[4]),
+            "mnc": _int(toks[5]),
+            "cell_id": toks[6],
+            "pci": _int(toks[7]),
+            "earfcn": _int(toks[8]),
+            "band": _int(toks[9]),
+            "tac": toks[12],
+            "rsrp": _int(toks[13]),
+            "rsrq": _int(toks[14]),
+            "rssi": _int(toks[15]),
+            "sinr": _int(toks[16]),
+        }
+    return None
+
+
+def parse_qnwinfo(lines: list[str]) -> dict | None:
+    """Quectel +QNWINFO: "<act>","<oper>","<band>",<channel>."""
+    for line in lines:
+        if "No Service" in line:
+            return {"act": None, "operator_numeric": None, "band": None, "channel": None}
+        m = re.match(
+            r'\+QNWINFO:\s*"([^"]*)"\s*,\s*"?([^",]*)"?\s*,\s*"([^"]*)"\s*,\s*(\d+)', line
+        )
+        if m:
+            return {
+                "act": m.group(1),
+                "operator_numeric": m.group(2),
+                "band": m.group(3),
+                "channel": int(m.group(4)),
+            }
+    return None
+
+
 def parse_cmgl(lines: list[str]) -> list[tuple[int, int, str]]:
     """Parse AT+CMGL (PDU mode): header lines '+CMGL: idx,stat,alpha,len'
     each followed by a PDU hex line. Returns [(index, status, pdu_hex)]."""

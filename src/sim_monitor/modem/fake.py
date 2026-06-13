@@ -78,6 +78,16 @@ class FakeModemDriver(ModemDriver):
         self._check()
         return None if self.airplane else self.signal
 
+    def get_telemetry(self) -> dict:
+        self._check()
+        if self.airplane:
+            return {}
+        return {
+            "rat": "LTE", "rssi": -67, "rsrp": -94, "rsrq": -9, "sinr": 14,
+            "band": 13, "cell_id": "0144C3D5", "pci": 176, "earfcn": 5110,
+            "tac": "1A2B", "operator_numeric": "310260", "channel": 5110,
+        }
+
     def get_pdp_contexts(self) -> list[ActualPdpContext]:
         self._check()
         return [self.contexts[cid] for cid in sorted(self.contexts)]

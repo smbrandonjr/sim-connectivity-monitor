@@ -225,6 +225,17 @@ class TestDiagnostics:
         assert b"+CSQ: 18,99" in page.data
 
 
+class TestTelemetry:
+    def test_page_and_json(self, sim, client):
+        tick_until_connected(sim)
+        sim.daemon.tick()  # capture a telemetry sample
+        page = client.get("/telemetry")
+        assert page.status_code == 200
+        assert b"RSRP" in page.data
+        data = client.get("/api/telemetry.json").get_json()
+        assert data["latest"].get("rsrp") == -94
+
+
 class TestMessages:
     def test_inbox_renders(self, sim, client):
         page = client.get("/messages/")

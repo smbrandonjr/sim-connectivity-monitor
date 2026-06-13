@@ -65,6 +65,14 @@ CREATE TABLE IF NOT EXISTS sms (
     raw_pdu TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sms_ts ON sms(ts);
+CREATE TABLE IF NOT EXISTS telemetry (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    rssi INTEGER, rsrp INTEGER, rsrq INTEGER, sinr INTEGER,
+    rat TEXT, band INTEGER, cell_id TEXT, pci INTEGER,
+    earfcn INTEGER, tac TEXT, operator_numeric TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry(ts);
 """
 
 MAX_ROWS = 5000
@@ -227,6 +235,30 @@ class Database:
         with self._lock:
             self._conn.execute("DELETE FROM sms WHERE id = ?", (sms_id,))
             self._conn.commit()
+
+    # ── telemetry ────────────────────────────────────────────────────────
+    _TELEMETRY_COLS = (
+        "rssi", "rsrp", "rsrq", "sinr", "rat", "band",
+        "cell_id", "pci", "earfcn", "tac", "operator_numeric",
+    )
+
+    def add_telemetry(self, sample: dict[str, Any]) -> None:
+        values = [sample.get(c) for c in self._TELEMETRY_COLS]
+        with self._lock:
+            self._conn.execute(
+                f"INSERT INTO telemetry (ts, {', '.join(self._TELEMETRY_COLS)})"
+                f" VALUES (?, {', '.join('?' * len(self._TELEMETRY_COLS))})",
+                (time.time(), *values),
+            )
+            self._prune("telemetry")
+            self._conn.commit()
+
+    def recent_telemetry(self, limit: int = 500) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM telemetry ORDER BY ts DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def count_unread_sms(self) -> int:
         with self._lock:

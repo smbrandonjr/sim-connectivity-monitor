@@ -86,6 +86,15 @@ class ATModemDriver(ModemDriver):
     def get_signal(self) -> SignalQuality | None:
         return self._parse(at_parser.parse_csq, self.at.execute("AT+CSQ"))
 
+    def get_telemetry(self) -> dict:
+        # Generic 3GPP: only CSQ is universally available.
+        sq = self.get_signal()
+        data: dict = {}
+        if sq:
+            data["rssi"] = sq.rssi_dbm
+            data["signal_percent"] = sq.percent
+        return data
+
     def get_pdp_contexts(self) -> list[ActualPdpContext]:
         try:
             return at_parser.parse_cgdcont(self.at.execute("AT+CGDCONT?"))

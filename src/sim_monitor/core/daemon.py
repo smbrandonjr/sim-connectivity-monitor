@@ -90,6 +90,7 @@ class Daemon:
         self._registration: str | None = None
         self._variant_index = 0             # which PDP-context variant we're trying
         self._fallback_active = False       # on the built-in last-ditch default
+        self._next_telemetry = 0.0          # monotonic time of next telemetry poll
 
         store.update(profile_count=len(profiles))
 
@@ -573,6 +574,20 @@ class Daemon:
             interface=conn.interface,
             ip_address=conn.ip_address,
         )
+        self._maybe_poll_telemetry()
+
+    def _maybe_poll_telemetry(self) -> None:
+        """Capture deep link metrics on an interval (cheap AT reads, charted)."""
+        if self.driver is None or self.clock() < self._next_telemetry:
+            return
+        self._next_telemetry = self.clock() + self.config.daemon.telemetry_interval_seconds
+        try:
+            sample = self.driver.get_telemetry()
+        except ModemError:
+            return  # best-effort; cosmetic data
+        if sample:
+            self.store.update(telemetry=sample)
+            self.db.add_telemetry(sample)
 
     def _state_degraded(self) -> None:
         # Last-ditch: once the ladder is exhausted on the matched profile, fall

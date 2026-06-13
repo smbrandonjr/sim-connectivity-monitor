@@ -95,6 +95,12 @@ class ModemDriver(ABC):
     def get_signal(self) -> SignalQuality | None: ...
 
     @abstractmethod
+    def get_telemetry(self) -> dict:
+        """Rich link metrics for charts/history: any of rssi, rsrp, rsrq, sinr,
+        rat, band, cell_id, pci, earfcn, tac, operator_numeric, channel,
+        temperature. Missing keys are simply omitted."""
+
+    @abstractmethod
     def get_pdp_contexts(self) -> list[ActualPdpContext]: ...
 
     @abstractmethod

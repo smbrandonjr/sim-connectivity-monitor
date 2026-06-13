@@ -39,6 +39,15 @@ def sms():
     return jsonify(sim().db.recent_sms(limit=200))
 
 
+@bp.get("/telemetry.json")
+def telemetry():
+    app = sim()
+    return jsonify({
+        "latest": app.store.get().telemetry,
+        "history": list(reversed(app.db.recent_telemetry(limit=500))),
+    })
+
+
 @bp.get("/identity.json")
 def identity():
     return jsonify(sim().db.recent_identity(limit=100))

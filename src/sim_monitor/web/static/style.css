@@ -59,3 +59,5 @@ h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: v
 .ref-cmd:hover code { text-decoration: underline; }
 details { margin-top: 10px; }
 summary { cursor: pointer; }
+.metric-now { font-size: 22px; font-weight: 600; }
+.spark { width: 100%; height: 40px; margin-top: 6px; display: block; }

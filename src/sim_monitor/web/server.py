@@ -35,6 +35,7 @@ def create_app(sim_app) -> Flask:
         messages,
         profiles,
         status,
+        telemetry,
         timeline,
     )
 
@@ -46,6 +47,7 @@ def create_app(sim_app) -> Flask:
     flask_app.register_blueprint(diagnostics.bp)
     flask_app.register_blueprint(timeline.bp)
     flask_app.register_blueprint(messages.bp)
+    flask_app.register_blueprint(telemetry.bp)
     return flask_app
 
 

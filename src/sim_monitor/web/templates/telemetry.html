@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Telemetry — sim-monitor{% endblock %}
+{% block content %}
+<h1>Telemetry</h1>
+<p class="muted">Deep link metrics sampled while connected ({{ samples }} samples retained).
+  RSRP/RSRQ/SINR are the signal-quality measures that actually predict LTE throughput
+  and reliability — more telling than bars.</p>
+
+{% set t = snap.telemetry %}
+<div class="cards">
+  <section class="card">
+    <h2>Serving cell</h2>
+    <dl>
+      <dt>RAT / band</dt><dd>{{ t.get('rat') or '—' }} {% if t.get('band') %}· B{{ t['band'] }}{% endif %}</dd>
+      <dt>Operator (MCC/MNC)</dt><dd>{{ t.get('operator_numeric') or '—' }}</dd>
+      <dt>Cell ID / PCI</dt><dd>{{ t.get('cell_id') or '—' }} / {{ t.get('pci') if t.get('pci') is not none else '—' }}</dd>
+      <dt>EARFCN / TAC</dt><dd>{{ t.get('earfcn') if t.get('earfcn') is not none else '—' }} / {{ t.get('tac') or '—' }}</dd>
+    </dl>
+  </section>
+  {% for c in charts %}
+  <section class="card">
+    <h2>{{ c.label }}</h2>
+    <div class="metric-now">{{ c.latest if c.latest is not none else '—' }} <span class="muted">{{ c.unit }}</span></div>
+    {% if c.points %}
+    <svg class="spark" viewBox="0 0 280 40" preserveAspectRatio="none">
+      <polyline points="{{ c.points }}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+    </svg>
+    {% else %}<p class="muted">not enough data yet</p>{% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -124,6 +124,15 @@ class TestHappyPath:
         assert snap.signal_rssi == -77
         assert snap.routing_ok is True
 
+    def test_telemetry_captured_and_stored(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.tick(advance=60)  # past telemetry interval
+        snap = harness.store.get()
+        assert snap.telemetry.get("rsrp") == -94
+        assert snap.telemetry.get("band") == 13
+        history = harness.db.recent_telemetry()
+        assert history and history[0]["rsrp"] == -94
+
 
 class TestProfileSelection:
     def test_specific_profile_beats_default(self, tmp_path):
