@@ -233,6 +233,12 @@ fake modem and network backend. Pure logic (AT parsing, ICCID matching, PDP diff
 placeholder rendering) has no I/O and is unit-tested; hardware access sits behind
 driver/backend interfaces with fakes.
 
+## Not affiliated with Hologram
+
+This is an independent, community project. It is **not** affiliated with,
+endorsed by, or supported by Hologram — it simply works well with their SIMs.
+"Hologram" appears only where naming the carrier/APN is technically necessary.
+
 ## License
 
 MIT

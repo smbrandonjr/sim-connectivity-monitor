@@ -9,6 +9,17 @@ build/
 .ruff_cache/
 .coverage
 
+# Node / frontend build tooling (the built SPA under src/sim_monitor/web/spa IS committed)
+frontend/node_modules/
+frontend/.vite/
+npm-debug.log*
+# Ship only woff2 fonts in the built SPA; drop the bulky legacy fallbacks
+# (modern browsers use woff2 — saves ~4.5 MB of icon-font formats in the repo).
+src/sim_monitor/web/spa/assets/*.svg
+src/sim_monitor/web/spa/assets/*.eot
+src/sim_monitor/web/spa/assets/*.ttf
+src/sim_monitor/web/spa/assets/*.woff
+
 # IDE
 .idea/
 .vscode/

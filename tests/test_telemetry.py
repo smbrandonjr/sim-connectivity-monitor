@@ -3,7 +3,6 @@ from sim_monitor.modem.at_parser import (
     parse_qeng_servingcell,
     parse_qnwinfo,
 )
-from sim_monitor.web.routes.telemetry import sparkline_points
 
 
 class TestQcsq:
@@ -49,21 +48,6 @@ class TestQnwinfo:
     def test_no_service(self):
         r = parse_qnwinfo(["+QNWINFO: No Service"])
         assert r["operator_numeric"] is None
-
-
-class TestSparkline:
-    def test_points_generated(self):
-        pts = sparkline_points([-100, -90, -80], width=200, height=40)
-        assert pts.count(",") == 3  # three points
-        assert pts.startswith("0.0,")
-
-    def test_too_few_points(self):
-        assert sparkline_points([]) == ""
-        assert sparkline_points([-90]) == ""
-
-    def test_flat_series_no_div_by_zero(self):
-        pts = sparkline_points([-90, -90, -90])
-        assert pts  # does not raise
 
 
 class TestQuectelTelemetry:

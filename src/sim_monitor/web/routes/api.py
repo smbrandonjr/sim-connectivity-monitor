@@ -58,6 +58,17 @@ def identity():
     return jsonify(sim().db.recent_identity(limit=100))
 
 
+@bp.get("/events.json")
+def events():
+    kind = request.args.get("kind") or None
+    return jsonify(sim().db.recent_events(limit=300, kind=kind))
+
+
+@bp.get("/monitor.json")
+def monitor_results():
+    return jsonify(sim().db.recent_monitor_results(limit=200))
+
+
 @bp.get("/timeline.json")
 def timeline():
     app = sim()

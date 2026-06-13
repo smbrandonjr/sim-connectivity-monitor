@@ -12,7 +12,10 @@ default route, and heartbeats a configurable HTTP endpoint to prove connectivity
   - *Daemon thread* — tick-based state machine (`core/daemon.py`), sole owner of all
     modem/network mutations.
   - *Monitor thread* — HTTP heartbeat scheduler (`monitor/http_monitor.py`), read-only.
-  - *Main thread* — waitress serving Flask (`web/`), LAN-only.
+  - *Main thread* — waitress serving Flask (`web/`), LAN-only: a JSON API
+    (`web/routes/api.py`) plus the built Svelte SPA (`web/spa/`, served by
+    `web/routes/spa.py`). The SPA source lives in `frontend/` (Svelte+Vite+TS);
+    its build output is committed so the Pi never needs Node.
 - **States**: `NO_MODEM → MODEM_FOUND → SIM_READY → CONFIGURING → CONNECTING → CONNECTED`,
   plus `DEGRADED` (supervisor escalating) and `FALLBACK_TEST`.
 - **Web ↔ daemon**: Flask never touches hardware. It reads a lock-protected `StateStore`
@@ -44,8 +47,24 @@ default route, and heartbeats a configurable HTTP endpoint to prove connectivity
 .venv\Scripts\python -m pip install -e .[dev]
 .venv\Scripts\python -m pytest
 .venv\Scripts\python -m ruff check src tests
-.venv\Scripts\python -m sim_monitor --simulate          # run with fake modem
+.venv\Scripts\python -m sim_monitor --simulate          # run with fake modem (UI on :8080)
 ```
+
+### Frontend (Svelte SPA)
+
+The web UI is a single-page app in `frontend/` consuming the JSON API. The built
+output is committed to `src/sim_monitor/web/spa/` so deployment needs no Node.
+Rebuild after changing the frontend:
+
+```sh
+cd frontend && npm install && npm run build      # emits to ../src/sim_monitor/web/spa
+# `npm run dev` runs Vite with HMR, proxying /api to a local --simulate app on :8080
+```
+
+Only `woff2` fonts are committed (legacy font formats are gitignored to keep the
+repo small). Theme tokens/values come from the (git-ignored) theme guide; no
+proprietary brand fonts are vendored — Inter + JetBrains Mono (OFL) + Remix Icons
+(Apache) only.
 
 ## Deployment (Raspberry Pi, Raspberry Pi OS / Debian Trixie)
 
