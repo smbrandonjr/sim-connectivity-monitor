@@ -233,6 +233,25 @@ td.mono, .mono { font-family: var(--font-mono); }
 .chip:hover { border-color: var(--color-border-strong); color: var(--color-text-primary); }
 .chip.on { background: rgba(191, 253, 17, .12); color: var(--color-primary); border-color: var(--color-primary); }
 .chip-x { background: none; border: none; color: inherit; cursor: pointer; font-size: 13px; padding: 0; }
+/* modal */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1400; background: rgba(0, 0, 0, .55);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  background: var(--color-bg-surface); border: 1px solid var(--color-border-default);
+  box-shadow: var(--os-shadow); width: min(420px, 92vw); animation: modal-in .14s ease;
+}
+@keyframes modal-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.modal-header {
+  padding: 11px 16px; font-family: var(--font-mono); font-weight: 700; font-size: var(--fs-md);
+  border-bottom: 1px solid var(--color-border-default);
+}
+.modal-body { padding: 16px; color: var(--color-text-secondary); line-height: 1.5; }
+.modal-footer {
+  display: flex; justify-content: flex-end; gap: 8px; padding: 11px 16px;
+  border-top: 1px solid var(--color-border-default);
+}
 .metric-now { font-size: 24px; font-weight: 600; font-family: var(--font-mono); }
 .spark { width: 100%; height: 44px; display: block; margin-top: 4px; }
 .state-badge { font-family: var(--font-mono); padding: 4px 12px; border-radius: 9999px; font-weight: 700; }

@@ -4,7 +4,9 @@
   import { stateClass } from "./lib/format";
   import { api } from "./lib/api";
   import { toast } from "./lib/toast";
+  import { confirmDialog } from "./lib/confirm";
   import Toasts from "./lib/Toasts.svelte";
+  import ConfirmModal from "./lib/ConfirmModal.svelte";
   import Dashboard from "./views/Dashboard.svelte";
   import Profiles from "./views/Profiles.svelte";
   import Messages from "./views/Messages.svelte";
@@ -50,8 +52,14 @@
   }
 
   async function update() {
-    if (!confirm("Pull the latest code and restart the service on this device?")) return;
-    await api.cmd("update-app");
+    const ok = await confirmDialog({
+      title: "Update this device",
+      message: "Pull the latest code, reinstall, and restart the service on this device? "
+        + "It will be briefly offline while it restarts.",
+      confirmLabel: "Update & restart",
+      danger: true,
+    });
+    if (ok) await api.cmd("update-app");
   }
 
   onMount(() => {
@@ -77,6 +85,7 @@
 
 <div class="app-bg"></div>
 <Toasts />
+<ConfirmModal />
 
 <nav class="topbar">
   {#if editingName}

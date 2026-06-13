@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { api } from "../lib/api";
   import { toast } from "../lib/toast";
+  import { confirmDialog } from "../lib/confirm";
   import ContextEditor from "../lib/ContextEditor.svelte";
 
   let data: any = { profiles: [], errors: [], active: null, forced: null };
@@ -82,7 +83,12 @@
 
   async function load() { data = await api.profiles(); }
   async function del(name: string) {
-    if (!confirm(`Delete profile ${name}?`)) return;
+    const ok = await confirmDialog({
+      title: "Delete profile",
+      message: `Delete profile "${name}"? This can't be undone.`,
+      confirmLabel: "Delete", danger: true,
+    });
+    if (!ok) return;
     await api.deleteProfile(name);
     setTimeout(load, 400);
   }

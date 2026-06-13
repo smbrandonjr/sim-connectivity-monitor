@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { api } from "../lib/api";
   import { toast } from "../lib/toast";
+  import { confirmDialog } from "../lib/confirm";
   import { ts } from "../lib/format";
 
   let messages: any[] = [];
@@ -30,7 +31,12 @@
   }
 
   async function clearAll() {
-    if (!confirm("Delete ALL messages on the modem?")) return;
+    const ok = await confirmDialog({
+      title: "Clear all messages",
+      message: "Delete ALL messages stored on the modem? This can't be undone.",
+      confirmLabel: "Clear all", danger: true,
+    });
+    if (!ok) return;
     await api.cmd("clear-sms");
     setTimeout(load, 1000);
   }
