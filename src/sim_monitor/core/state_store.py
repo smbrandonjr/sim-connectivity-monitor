@@ -81,6 +81,7 @@ class Snapshot:
     iccid: str | None = None
     imsi: str | None = None
     operator: str | None = None
+    registration: str | None = None
     signal_rssi: int | None = None
     signal_percent: int | None = None
     interface: str | None = None

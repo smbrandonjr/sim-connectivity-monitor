@@ -33,6 +33,25 @@ CREATE TABLE IF NOT EXISTS monitor_results (
     error TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_ts ON monitor_results(ts);
+CREATE TABLE IF NOT EXISTS urc_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    kind TEXT NOT NULL,
+    raw TEXT NOT NULL,
+    data TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_urc_ts ON urc_log(ts);
+CREATE TABLE IF NOT EXISTS identity_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    iccid TEXT,
+    imsi TEXT,
+    imei TEXT,
+    operator TEXT,
+    registration TEXT,
+    reason TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_identity_ts ON identity_history(ts);
 """
 
 MAX_ROWS = 5000
@@ -98,6 +117,48 @@ class Database:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM monitor_results ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_urc(self, kind: str, raw: str, data: dict[str, Any] | None = None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO urc_log (ts, kind, raw, data) VALUES (?, ?, ?, ?)",
+                (time.time(), kind, raw, json.dumps(data) if data else None),
+            )
+            self._prune("urc_log")
+            self._conn.commit()
+
+    def recent_urcs(self, limit: int = 300) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM urc_log ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_identity(
+        self,
+        iccid: str | None,
+        imsi: str | None,
+        imei: str | None,
+        operator: str | None,
+        registration: str | None,
+        reason: str,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO identity_history"
+                " (ts, iccid, imsi, imei, operator, registration, reason)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (time.time(), iccid, imsi, imei, operator, registration, reason),
+            )
+            self._prune("identity_history")
+            self._conn.commit()
+
+    def recent_identity(self, limit: int = 100) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM identity_history ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
 

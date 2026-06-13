@@ -46,6 +46,7 @@ class Daemon:
         store: StateStore,
         command_queue: CommandQueue,
         events: EventLog,
+        db,
         clock=time.monotonic,
         notifier: SdNotifier | None = None,
     ) -> None:
@@ -56,6 +57,7 @@ class Daemon:
         self.store = store
         self.commands = command_queue
         self.events = events
+        self.db = db
         self.clock = clock
         self.notifier = notifier
         self.supervisor = Supervisor()
@@ -68,8 +70,17 @@ class Daemon:
         self._connect_deadline: float | None = None
         self._activation_logged = False
         self._fallback_until: float | None = None
+        self._events_enabled = False        # URC reporting configured on this driver
+        self._sim_refresh_pending = False   # a SIM refresh/insert URC was seen
+        self._sms_pending = False           # a +CMTI was seen (Phase 2 fetches)
+        self._last_identity: tuple | None = None  # (iccid, imsi, imei) last recorded
+        self._registration: str | None = None
 
         store.update(profile_count=len(profiles))
+
+    @property
+    def sms_pending(self) -> bool:
+        return self._sms_pending
 
     # ------------------------------------------------------------------ loop
 
@@ -84,6 +95,7 @@ class Daemon:
         if self.notifier:
             self.notifier.watchdog()
         try:
+            self._poll_urcs()
             for command in self.commands.drain():
                 self._handle_command(command)
             handler = getattr(self, f"_state_{self.state.value.lower()}")
@@ -197,7 +209,55 @@ class Daemon:
             return
         self.driver = driver
         self.events.info("modem", f"modem detected ({driver.name})")
+        self._enable_event_reporting()
         self._go(S.MODEM_FOUND)
+
+    def _enable_event_reporting(self) -> None:
+        """Turn on verbose URCs once per driver (best-effort)."""
+        if self._events_enabled or self.driver is None:
+            return
+        try:
+            self.driver.enable_event_reporting()
+            self._events_enabled = True
+        except ModemError as e:
+            self.events.warning("modem", f"could not enable event reporting: {e}")
+
+    def _poll_urcs(self) -> None:
+        """Capture + react to unsolicited modem events each tick."""
+        if self.driver is None:
+            return
+        try:
+            urcs = self.driver.poll_events()
+        except ModemError:
+            return  # transient; the active state handler will detect a real wedge
+        for ev in urcs:
+            self.db.add_urc(ev.kind, ev.raw, ev.fields or None)
+            if ev.kind == "sim_status":
+                self._sim_refresh_pending = True
+                self.events.info("ota", f"SIM status/refresh URC: {ev.raw}")
+            elif ev.kind == "new_sms":
+                self._sms_pending = True
+                self.events.info("urc", f"new SMS indication: {ev.raw}")
+            elif ev.kind == "registration":
+                label = ev.fields.get("label", ev.raw)
+                if label != self._registration:
+                    self._registration = label
+                    self.store.update(registration=label)
+                    self.events.info("identity", f"registration: {label}")
+                    self._record_identity("registration-change")
+            elif ev.kind not in ("unknown",):
+                self.events.info("urc", f"{ev.kind}: {ev.raw}")
+
+    def _record_identity(self, reason: str) -> None:
+        snap = self.store.get()
+        key = (snap.iccid, snap.imsi, snap.imei)
+        if reason != "registration-change" and key == self._last_identity:
+            return
+        self._last_identity = key
+        self.db.add_identity(
+            iccid=snap.iccid, imsi=snap.imsi, imei=snap.imei,
+            operator=snap.operator, registration=self._registration, reason=reason,
+        )
 
     def _state_modem_found(self) -> None:
         assert self.driver is not None
@@ -213,6 +273,7 @@ class Daemon:
             self.store.update(sim_present=False, iccid=None, imsi=None, last_error=sim.detail)
             return  # keep polling: SIM may be inserted any moment
         self.store.update(sim_present=True, iccid=sim.iccid, imsi=sim.imsi)
+        self._record_identity("sim-ready")
         self.events.info("sim", f"SIM ready, ICCID {sim.iccid}")
         self._go(S.SIM_READY)
 
@@ -325,18 +386,37 @@ class Daemon:
             self.events.warning("sim", "SIM removed while connected")
             self._safe_disconnect()
             self.active_profile = None
+            self._sim_refresh_pending = False
             self._go(
                 S.MODEM_FOUND,
                 sim_present=False, iccid=None, imsi=None,
                 interface=None, ip_address=None, active_profile=None,
             )
             return
-        if sim.iccid != snapshot.iccid:
-            self.events.warning(
-                "sim", f"hot SIM swap detected: {snapshot.iccid} -> {sim.iccid}"
+        # Detect a SIM/profile change three ways: a changed ICCID, a changed
+        # IMSI (a profile swap can keep the ICCID but move the IMSI), or a SIM
+        # refresh URC. A Hologram OTA swap often keeps the bearer superficially
+        # "active" on the same APN, so connectivity alone never reveals it — and
+        # the AT port may report the *stale* ICCID until a re-attach. Reacting to
+        # any of the three is what makes the OTA reconnect that v1 missed.
+        identity_changed = sim.iccid != snapshot.iccid or sim.imsi != snapshot.imsi
+        if identity_changed or self._sim_refresh_pending:
+            reason = (
+                "SIM refresh / OTA profile change"
+                if self._sim_refresh_pending and not identity_changed
+                else "SIM identity change"
             )
+            self.events.warning(
+                "ota",
+                f"{reason} while connected: "
+                f"ICCID {snapshot.iccid}->{sim.iccid}, IMSI {snapshot.imsi}->{sim.imsi}; "
+                "re-evaluating profile and re-attaching",
+            )
+            self._sim_refresh_pending = False
             self._safe_disconnect()
             self.active_profile = None
+            self.store.update(iccid=sim.iccid, imsi=sim.imsi)
+            self._record_identity("ota-swap")
             self._go(
                 S.SIM_READY,
                 iccid=sim.iccid, imsi=sim.imsi,
@@ -516,6 +596,10 @@ class Daemon:
         """Forget the modem and re-detect from scratch (after resets/power cycles)."""
         self.driver = None
         self.active_profile = None
+        self._events_enabled = False
+        self._sim_refresh_pending = False
+        self._registration = None
+        self._last_identity = None
         self._go(
             S.NO_MODEM,
             sim_present=False, iccid=None, imsi=None,

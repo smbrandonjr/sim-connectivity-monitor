@@ -58,6 +58,7 @@ class Harness:
             store=self.store,
             command_queue=self.queue,
             events=self.events,
+            db=self.db,
             clock=lambda: self.t,
         )
 
@@ -191,6 +192,85 @@ class TestHotSwap:
         snap = harness.store.get()
         assert snap.sim_present is False
         assert snap.ip_address is None
+
+    def test_imsi_only_change_detected(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.driver.imsi = "310030000099999"  # same ICCID, new IMSI (profile swap)
+        harness.tick()
+        assert harness.daemon.state is State.SIM_READY
+        harness.run_until(State.CONNECTED)
+
+
+class TestOtaSwap:
+    """The field bug: a Hologram OTA enables a new profile (new ICCID), the SIM
+    refreshes, but v1 stayed CONNECTED on the stale ICCID and never reconnected."""
+
+    def test_ota_swap_with_refresh_urc_reconnects(self, tmp_path):
+        catchall = Profile.model_validate(
+            {
+                "name": "any",
+                "match": {"iccid_patterns": ["*"], "priority": 1000},
+                "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}],
+            }
+        )
+        h = Harness(tmp_path, profiles=[catchall])
+        h.run_until(State.CONNECTED)
+        assert h.store.get().iccid == DEFAULT_ICCID
+
+        h.driver.ota_swap("8946420000000000123")  # new ICCID + a +QSIMSTAT URC
+        h.tick()  # URC polled -> sim_refresh_pending; CONNECTED handler re-evaluates
+        assert h.daemon.state is State.SIM_READY
+        h.run_until(State.CONNECTED)
+        assert h.store.get().iccid == "8946420000000000123"
+        assert "ota" in h.event_kinds()
+
+    def test_ota_swap_detected_even_if_iccid_reads_stale(self, tmp_path):
+        # Worst case: AT port still reports the OLD ICCID after refresh, but the
+        # refresh URC alone must still force a re-attach.
+        h = Harness(tmp_path)
+        h.run_until(State.CONNECTED)
+        before = h.store.get().iccid
+        h.driver.push_urc("sim_status", {"enabled": 1, "inserted": 1}, raw="+QSIMSTAT: 1,1")
+        h.tick()
+        assert h.daemon.state is State.SIM_READY  # re-attach forced despite stale ICCID
+        h.run_until(State.CONNECTED)
+        assert h.store.get().iccid == before
+
+    def test_urcs_are_logged(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.driver.push_urc("new_sms", {"storage": "ME", "index": 1}, raw='+CMTI: "ME",1')
+        harness.tick()
+        urcs = harness.db.recent_urcs()
+        assert any(u["kind"] == "new_sms" for u in urcs)
+        assert harness.daemon.sms_pending is True
+
+    def test_registration_urc_updates_store(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.driver.push_urc(
+            "registration", {"stat": 5, "label": "registered-roaming"}, raw="+CEREG: 5"
+        )
+        harness.tick()
+        assert harness.store.get().registration == "registered-roaming"
+
+    def test_event_reporting_enabled_once(self, harness):
+        harness.run_until(State.CONNECTED)
+        assert harness.driver.event_reporting_enabled is True
+
+    def test_identity_history_records_swap(self, tmp_path):
+        h = Harness(tmp_path, profiles=[
+            Profile.model_validate({
+                "name": "any", "match": {"iccid_patterns": ["*"], "priority": 1000},
+                "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}],
+            })
+        ])
+        h.run_until(State.CONNECTED)
+        h.driver.ota_swap("8946420000000000999")
+        h.tick()
+        h.run_until(State.CONNECTED)
+        history = h.db.recent_identity()
+        iccids = [row["iccid"] for row in history]
+        assert "8946420000000000999" in iccids
+        assert any(row["reason"] == "ota-swap" for row in history)
 
 
 class TestRecovery:

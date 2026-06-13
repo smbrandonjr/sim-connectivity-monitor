@@ -66,6 +66,7 @@ def build(config: AppConfig, profiles: list[Profile]) -> App:
         store=store,
         command_queue=commands,
         events=events,
+        db=db,
         clock=time.monotonic,
         notifier=SdNotifier(),
     )
