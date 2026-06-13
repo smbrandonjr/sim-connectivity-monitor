@@ -88,6 +88,7 @@ class Snapshot:
     signal_percent: int | None = None
     interface: str | None = None
     ip_address: str | None = None
+    apn: str | None = None
     routing_ok: bool | None = None
     active_profile: str | None = None
     forced_profile: str | None = None
@@ -101,26 +102,45 @@ class Snapshot:
     updated_at: float = field(default_factory=time.time)
 
     def placeholder_context(self) -> dict[str, Any]:
-        """Values available to monitor request templates."""
+        """Native-typed values available to heartbeat fields/templates. Numbers
+        stay numbers, strings stay strings; unknowns are None (omitted by the
+        structured body builder). Host metrics (uptime/cpu/mem/temp) and
+        sampled_at are merged in by the monitor at send time."""
         import socket
 
         status, status_message = derive_status(self)
-        return {
+        t = self.telemetry or {}
+        ctx: dict[str, Any] = {
             "status": status,
             "status_message": status_message,
             "iccid": self.iccid,
             "imei": self.imei,
             "imsi": self.imsi,
             "operator": self.operator,
+            "registration": self.registration,
             "signal_rssi": self.signal_rssi,
+            "rssi": self.signal_rssi,          # alias
             "signal_percent": self.signal_percent,
             "ip_address": self.ip_address,
             "interface": self.interface,
+            "apn": self.apn,
             "hostname": socket.gethostname(),
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "state": self.state.value,
             "profile_name": self.active_profile,
+            "sim_name": self.sim_name,
+            "firmware": self.firmware,
+            "vendor": self.vendor,
+            "model": self.model,
+            "modem_model": (f"{self.vendor} {self.model}".strip() or None)
+            if (self.vendor or self.model) else None,
+            "last_error": self.last_error,
         }
+        # Deep telemetry (native types), key names matching the receiving schema.
+        for key in ("rat", "rsrp", "rsrq", "sinr", "band", "earfcn", "cell_id",
+                    "tac", "pci", "mcc", "mnc", "operator_numeric", "channel"):
+            ctx[key] = t.get(key)
+        return ctx
 
 
 class StateStore:

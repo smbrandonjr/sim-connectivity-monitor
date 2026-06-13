@@ -220,6 +220,27 @@ class TestMonitorConfigApi:
         resp = client.put("/api/monitor-config", json={"enabled": True})  # no request
         assert resp.status_code == 400
 
+    def test_body_fields_roundtrip(self, sim, client):
+        cfg = {
+            "enabled": True,
+            "request": {
+                "method": "POST", "url": "https://hooks.example.com/ingest",
+                "body_fields": [
+                    {"path": "iccid", "value": "iccid", "kind": "placeholder"},
+                    {"path": "signal.rsrp_dbm", "value": "rsrp", "kind": "placeholder"},
+                ],
+            },
+        }
+        assert client.put("/api/monitor-config", json=cfg).status_code == 200
+        got = client.get("/api/monitor-config.json").get_json()
+        assert got["request"]["body_fields"][1]["path"] == "signal.rsrp_dbm"
+
+    def test_placeholders_endpoint(self, sim, client):
+        tick_until_connected(sim)
+        ctx = client.get("/api/placeholders.json").get_json()
+        assert ctx["iccid"] == "8944500612345678901"
+        assert "rsrp" in ctx and "status" in ctx and "sampled_at" in ctx
+
     def test_profile_override_wins_when_enabled(self, sim, client):
         # Global disabled; an enabled profile monitor overrides it.
         prof_yaml = (

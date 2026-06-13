@@ -159,6 +159,42 @@ def test_connected_probe_reports_connected_status(env):
     assert "via Hologram" in body
 
 
+FIELDS_PROFILE = Profile.model_validate(
+    {
+        "name": "fields",
+        "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}],
+        "monitor": {
+            "enabled": True,
+            "request": {
+                "method": "POST",
+                "url": "https://hooks.example.com/ingest",
+                "body_fields": [
+                    {"path": "iccid", "value": "iccid"},
+                    {"path": "status", "value": "status"},
+                    {"path": "signal.rssi_dbm", "value": "rssi"},
+                    {"path": "signal.sinr_db", "value": "sinr"},  # unknown -> omitted
+                    {"path": "meta.tags", "value": "warehouse", "kind": "static"},
+                ],
+            },
+        },
+    }
+)
+
+
+def test_body_fields_produce_valid_typed_json(env):
+    import json
+
+    monitor, session, _ = env
+    monitor.store.update(signal_rssi=-67)
+    monitor.probe(FIELDS_PROFILE.monitor)
+    sent = json.loads(session.calls[0]["data"].decode())
+    assert sent["iccid"] == "8944500612345678901"
+    assert sent["status"] == "connected"
+    assert sent["signal"]["rssi_dbm"] == -67  # native int
+    assert "sinr_db" not in sent["signal"]  # unknown omitted -> still valid JSON
+    assert sent["meta"]["tags"] == "warehouse"
+
+
 def test_send_when_degraded_default_on():
     assert PROFILE.monitor.send_when_degraded is True
 

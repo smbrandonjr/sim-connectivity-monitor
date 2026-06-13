@@ -493,6 +493,7 @@ class Daemon:
         except (ModemError, BackendError) as e:
             self._fail(f"configuration failed: {e}")
             return
+        self.store.update(apn=bearer.apn)
         self._connect_deadline = (
             self.clock() + self.config.daemon.registration_timeout_seconds
         )

@@ -64,11 +64,27 @@ class RoutingConfig(StrictModel):
     metric: int = Field(default=50, ge=1, le=10000)
 
 
+class BodyField(StrictModel):
+    """One field in a structured JSON body, built clickably in the UI.
+
+    `path` is a dot-path into the JSON object (e.g. "signal.rsrp_dbm"); for a
+    placeholder field, `value` is a placeholder name (e.g. "rsrp") resolved with
+    its native type at send time and OMITTED if unknown — so the body is always
+    valid JSON. For a static field, `value` is a literal."""
+
+    path: str = Field(pattern=r"^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$")
+    value: str
+    kind: Literal["placeholder", "static"] = "placeholder"
+
+
 class MonitorRequest(StrictModel):
     method: Literal["GET", "POST", "PUT", "PATCH", "HEAD"] = "POST"
     url: str
     headers: dict[str, str] = Field(default_factory=dict)
     body: str = ""
+    # Structured body builder (preferred). When non-empty, the JSON body is
+    # assembled from these fields and `body` is ignored.
+    body_fields: list[BodyField] = Field(default_factory=list)
     timeout_seconds: float = Field(default=15, gt=0, le=300)
     expect_status: list[int] = Field(default=[200, 204], min_length=1)
 

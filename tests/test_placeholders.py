@@ -1,4 +1,6 @@
-from sim_monitor.monitor.placeholders import render, render_request
+import json
+
+from sim_monitor.monitor.placeholders import render, render_body_fields, render_request
 
 
 class TestRender:
@@ -48,3 +50,38 @@ class TestRenderRequest:
     def test_unknowns_aggregated(self):
         _, _, _, unknown = render_request("{a}", {"h": "{b}"}, "{c}", {})
         assert unknown == {"a", "b", "c"}
+
+
+class TestRenderBodyFields:
+    def _f(self, path, value, kind="placeholder"):
+        return {"path": path, "value": value, "kind": kind}
+
+    def test_nested_and_typed(self):
+        fields = [
+            self._f("iccid", "iccid"),
+            self._f("status", "status"),
+            self._f("signal.rsrp_dbm", "rsrp"),
+            self._f("signal.band", "band"),
+            self._f("meta.fw", "firmware"),
+        ]
+        ctx = {"iccid": "894", "status": "connected", "rsrp": -95, "band": 2, "firmware": "EC25"}
+        out = json.loads(render_body_fields(fields, ctx))
+        assert out == {
+            "iccid": "894", "status": "connected",
+            "signal": {"rsrp_dbm": -95, "band": 2},  # numbers stay numbers
+            "meta": {"fw": "EC25"},
+        }
+
+    def test_unknown_values_omitted_keeps_valid_json(self):
+        fields = [self._f("signal.rsrp_dbm", "rsrp"), self._f("signal.sinr_db", "sinr")]
+        ctx = {"rsrp": -95, "sinr": None}  # sinr unknown
+        out = json.loads(render_body_fields(fields, ctx))
+        assert out == {"signal": {"rsrp_dbm": -95}}  # sinr dropped, still valid
+
+    def test_static_field(self):
+        fields = [self._f("meta.tag", "warehouse", kind="static")]
+        out = json.loads(render_body_fields(fields, {}))
+        assert out == {"meta": {"tag": "warehouse"}}
+
+    def test_empty_fields_is_empty_object(self):
+        assert render_body_fields([], {}) == "{}"

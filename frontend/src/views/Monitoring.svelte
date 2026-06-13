@@ -4,25 +4,105 @@
   import { toast } from "../lib/toast";
   import { ts } from "../lib/format";
 
-  // Editable form model mirroring MonitorConfig.
+  // top-level config
   let enabled = false;
   let interval_seconds = 300;
   let send_when_degraded = true;
   let bind_cellular = true;
   let method = "POST";
   let url = "";
-  let body = "";
   let timeout_seconds = 15;
   let expectStatus = "200, 204";
   let headers: { key: string; value: string }[] = [];
 
+  // body: structured builder (default) or raw template
+  let useRawBody = false;
+  let rawBody = "";
+  let fields: { path: string; value: string; kind: string }[] = [];
+  let custom = { path: "", value: "", kind: "static" };
+
+  let phValues: Record<string, any> = {};
   let history: any[] = [];
   let total = 0;
   let page = 0;
   const PAGE_SIZE = 25;
 
-  const PLACEHOLDERS = "{iccid} {imei} {imsi} {operator} {signal_rssi} {signal_percent} " +
-    "{ip_address} {hostname} {timestamp} {state} {profile_name} {status} {status_message}";
+  // Catalog of clickable fields → JSON path + placeholder. Grouped to match a
+  // typical ingest schema (top level / signal.* / meta.*).
+  const CATALOG: { group: string; label: string; path: string; value: string }[] = [
+    { group: "Top level", label: "iccid", path: "iccid", value: "iccid" },
+    { group: "Top level", label: "status", path: "status", value: "status" },
+    { group: "Top level", label: "rat", path: "rat", value: "rat" },
+    { group: "Top level", label: "network (operator)", path: "network", value: "operator" },
+    { group: "signal", label: "rssi_dbm", path: "signal.rssi_dbm", value: "rssi" },
+    { group: "signal", label: "rsrp_dbm", path: "signal.rsrp_dbm", value: "rsrp" },
+    { group: "signal", label: "rsrq_db", path: "signal.rsrq_db", value: "rsrq" },
+    { group: "signal", label: "sinr_db", path: "signal.sinr_db", value: "sinr" },
+    { group: "signal", label: "bars (%)", path: "signal.bars", value: "signal_percent" },
+    { group: "signal", label: "band", path: "signal.band", value: "band" },
+    { group: "signal", label: "earfcn", path: "signal.earfcn", value: "earfcn" },
+    { group: "signal", label: "cell_id", path: "signal.cell_id", value: "cell_id" },
+    { group: "signal", label: "tac", path: "signal.tac", value: "tac" },
+    { group: "signal", label: "pci", path: "signal.pci", value: "pci" },
+    { group: "signal", label: "mcc", path: "signal.mcc", value: "mcc" },
+    { group: "signal", label: "mnc", path: "signal.mnc", value: "mnc" },
+    { group: "signal", label: "operator", path: "signal.operator", value: "operator" },
+    { group: "meta", label: "probe_id (SIM name)", path: "meta.probe_id", value: "sim_name" },
+    { group: "meta", label: "fw", path: "meta.fw", value: "firmware" },
+    { group: "meta", label: "modem_model", path: "meta.modem_model", value: "modem_model" },
+    { group: "meta", label: "imei", path: "meta.imei", value: "imei" },
+    { group: "meta", label: "imsi", path: "meta.imsi", value: "imsi" },
+    { group: "meta", label: "apn", path: "meta.apn", value: "apn" },
+    { group: "meta", label: "ip", path: "meta.ip", value: "ip_address" },
+    { group: "meta", label: "interface", path: "meta.interface", value: "interface" },
+    { group: "meta", label: "registration", path: "meta.registration", value: "registration" },
+    { group: "meta", label: "status_message", path: "meta.status_message", value: "status_message" },
+    { group: "meta", label: "last_error", path: "meta.last_error", value: "last_error" },
+    { group: "meta", label: "uptime_s", path: "meta.uptime_s", value: "uptime_s" },
+    { group: "meta", label: "cpu_load", path: "meta.cpu_load", value: "cpu_load" },
+    { group: "meta", label: "mem_free_mb", path: "meta.mem_free_mb", value: "mem_free_mb" },
+    { group: "meta", label: "temperature_c", path: "meta.temperature_c", value: "temperature_c" },
+    { group: "meta", label: "sampled_at", path: "meta.sampled_at", value: "sampled_at" },
+  ];
+  const GROUPS = ["Top level", "signal", "meta"];
+  const RECOMMENDED = ["iccid", "status", "signal.rssi_dbm", "signal.rsrp_dbm", "signal.sinr_db",
+    "signal.band", "meta.imei", "meta.fw", "meta.ip", "meta.sampled_at"];
+
+  function selected(path: string) { return fields.some((f) => f.path === path); }
+  function toggle(item: { path: string; value: string }) {
+    fields = selected(item.path)
+      ? fields.filter((f) => f.path !== item.path)
+      : [...fields, { path: item.path, value: item.value, kind: "placeholder" }];
+  }
+  function removeField(path: string) { fields = fields.filter((f) => f.path !== path); }
+  function addCustom() {
+    if (!custom.path.trim() || !custom.value.trim()) return;
+    fields = [...fields, { ...custom, path: custom.path.trim() }];
+    custom = { path: "", value: "", kind: "static" };
+  }
+  function selectRecommended() {
+    fields = CATALOG.filter((c) => RECOMMENDED.includes(c.path))
+      .map((c) => ({ path: c.path, value: c.value, kind: "placeholder" }));
+  }
+  function isCustom(f: { path: string }) { return !CATALOG.some((c) => c.path === f.path); }
+
+  // Live preview mirroring the server's render_body_fields (omit unknowns, keep types).
+  function buildPreviewObj() {
+    const out: any = {};
+    for (const f of fields) {
+      let v: any;
+      if (f.kind === "placeholder") {
+        v = phValues[f.value];
+        if (v === null || v === undefined) continue;
+      } else v = f.value;
+      const parts = f.path.split(".");
+      let node = out;
+      for (const p of parts.slice(0, -1)) node = node[p] ??= {};
+      node[parts[parts.length - 1]] = v;
+    }
+    return out;
+  }
+  $: preview = JSON.stringify(buildPreviewObj(), null, 2);
 
   async function load() {
     const c = await api.monitorConfig();
@@ -33,23 +113,24 @@
     const r = c.request ?? {};
     method = r.method ?? "POST";
     url = r.url ?? "";
-    body = r.body ?? "";
     timeout_seconds = r.timeout_seconds ?? 15;
     expectStatus = (r.expect_status ?? [200, 204]).join(", ");
     headers = Object.entries(r.headers ?? {}).map(([key, value]) => ({ key, value: String(value) }));
+    fields = (r.body_fields ?? []).map((f: any) => ({ ...f }));
+    rawBody = r.body ?? "";
+    useRawBody = !fields.length && !!rawBody;
   }
+
+  async function loadPlaceholders() { phValues = await api.placeholders(); }
 
   async function loadHistory() {
     const data = await api.monitorHistory(PAGE_SIZE, page * PAGE_SIZE);
-    history = data.results;
-    total = data.total;
+    history = data.results; total = data.total;
   }
-
   function goPage(p: number) {
     page = Math.max(0, Math.min(p, Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)));
     loadHistory();
   }
-
   $: pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   $: rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
   $: rangeEnd = Math.min(total, (page + 1) * PAGE_SIZE);
@@ -60,34 +141,30 @@
     const expect = expectStatus.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
     const cfg: any = { enabled, interval_seconds, send_when_degraded, bind_cellular };
     if (url.trim()) {
-      cfg.request = {
-        method, url: url.trim(), headers: hdrs, body,
+      const req: any = {
+        method, url: url.trim(), headers: hdrs,
         timeout_seconds, expect_status: expect.length ? expect : [200, 204],
       };
+      if (useRawBody) req.body = rawBody;
+      else req.body_fields = fields;
+      cfg.request = req;
     }
     return cfg;
   }
-
   async function save() {
     if (await api.saveMonitorConfig(buildConfig())) toast("monitoring saved", "ok");
   }
-
   async function sendNow() {
-    if (await api.cmd("monitor-now")) {
-      toast("heartbeat sent", "ok");
-      setTimeout(loadHistory, 1500);
-    }
+    if (await api.cmd("monitor-now")) { toast("heartbeat sent", "ok"); setTimeout(loadHistory, 1500); }
   }
-
   function addHeader() { headers = [...headers, { key: "", value: "" }]; }
   function removeHeader(i: number) { headers = headers.filter((_, idx) => idx !== i); }
 
   onMount(() => {
-    load();
-    loadHistory();
-    // Auto-refresh only on the first page, so browsing older pages stays put.
+    load(); loadPlaceholders(); loadHistory();
     const t = setInterval(() => { if (page === 0) loadHistory(); }, 5000);
-    return () => clearInterval(t);
+    const p = setInterval(loadPlaceholders, 5000);
+    return () => { clearInterval(t); clearInterval(p); };
   });
 </script>
 
@@ -110,12 +187,12 @@
 </section>
 
 <section class="ui-card">
-  <h2>Request</h2>
+  <h2>Endpoint</h2>
   <div class="row">
     <select class="ui-select" style="width:auto" bind:value={method}>
       {#each ["POST", "GET", "PUT", "PATCH", "HEAD"] as m}<option>{m}</option>{/each}
     </select>
-    <input class="ui-input" style="flex:1;min-width:280px" placeholder="https://your-endpoint.example.com/heartbeat" bind:value={url} />
+    <input class="ui-input" style="flex:1;min-width:280px" placeholder="https://your-endpoint.example.com/ingest/monitor/TOKEN" bind:value={url} />
   </div>
 
   <h2 style="margin-top:14px">Headers</h2>
@@ -127,13 +204,61 @@
     </div>
   {/each}
   <button class="ui-btn ui-btn-sm" on:click={addHeader}>+ header</button>
+</section>
 
-  <h2 style="margin-top:14px">Body</h2>
-  <textarea class="ui-textarea" rows="5" bind:value={body}
-    placeholder={'{"iccid":"{iccid}","status":"{status}","rssi":"{signal_rssi}"}'}></textarea>
-  <p class="muted">Placeholders (usable in URL, headers, body): <code>{PLACEHOLDERS}</code></p>
+<section class="ui-card">
+  <div class="row">
+    <h2 style="flex:1">Payload</h2>
+    <label class="muted"><input type="checkbox" bind:checked={useRawBody} /> raw template instead</label>
+  </div>
 
-  <div class="row" style="margin-top:8px">
+  {#if useRawBody}
+    <textarea class="ui-textarea" rows="6" bind:value={rawBody}
+      placeholder={'{"iccid":"{iccid}","status":"{status}"}'}></textarea>
+    <p class="muted">Tokens in <code>{'{'}braces{'}'}</code> are substituted. Prefer the field
+      builder — it always produces valid JSON and correct number/string types.</p>
+  {:else}
+    <div class="row">
+      <button class="ui-btn ui-btn-sm" on:click={selectRecommended}>Use recommended set</button>
+      <button class="ui-btn ui-btn-sm" on:click={() => (fields = [])}>Clear</button>
+      <span class="muted">Click fields to include them. Unknown values are dropped automatically.</span>
+    </div>
+    {#each GROUPS as g}
+      <h3 style="font-size:var(--fs-sm);margin:12px 0 4px;color:var(--color-text-muted)">{g === "Top level" ? "Top level" : g + ".*"}</h3>
+      <div class="chips">
+        {#each CATALOG.filter((c) => c.group === g) as item}
+          <button class="chip" class:on={selected(item.path)} on:click={() => toggle(item)}
+                  title={"= {" + item.value + "} → " + (phValues[item.value] ?? "—")}>
+            {selected(item.path) ? "✓ " : "+ "}{item.label}
+          </button>
+        {/each}
+      </div>
+    {/each}
+
+    <h3 style="font-size:var(--fs-sm);margin:12px 0 4px;color:var(--color-text-muted)">Custom field</h3>
+    <div class="row">
+      <input class="ui-input" style="max-width:200px" placeholder="path e.g. meta.tags" bind:value={custom.path} />
+      <select class="ui-select" style="width:auto" bind:value={custom.kind}>
+        <option value="static">static value</option>
+        <option value="placeholder">placeholder</option>
+      </select>
+      <input class="ui-input" style="flex:1" placeholder={custom.kind === "static" ? "literal value" : "placeholder name e.g. rsrp"} bind:value={custom.value} />
+      <button class="ui-btn ui-btn-sm" on:click={addCustom}>+ add</button>
+    </div>
+    {#if fields.some(isCustom)}
+      <div style="margin-top:6px">
+        {#each fields.filter(isCustom) as f}
+          <span class="chip on">{f.path} = {f.kind === "static" ? f.value : "{" + f.value + "}"}
+            <button class="chip-x" on:click={() => removeField(f.path)}>×</button></span>
+        {/each}
+      </div>
+    {/if}
+
+    <h3 style="font-size:var(--fs-sm);margin:12px 0 4px;color:var(--color-text-muted)">Live preview (what would send now)</h3>
+    <div class="code-block">{preview}</div>
+  {/if}
+
+  <div class="row" style="margin-top:10px">
     <label class="muted">timeout <input class="ui-input" style="width:70px;display:inline-block" type="number" bind:value={timeout_seconds} /> s</label>
     <label class="muted">expect status <input class="ui-input" style="width:120px;display:inline-block" bind:value={expectStatus} /></label>
     <button class="ui-btn ui-btn-primary" on:click={save}>Save</button>

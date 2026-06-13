@@ -180,6 +180,18 @@ def command(name: str):
     return jsonify({"ok": True})
 
 
+@bp.get("/placeholders.json")
+def placeholders():
+    """Current values of every heartbeat placeholder, for the payload builder's
+    live preview (host metrics + sampled_at included)."""
+    from sim_monitor.system.host import collect_host_metrics
+
+    ctx = sim().store.get().placeholder_context()
+    ctx.update(collect_host_metrics())
+    ctx["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return jsonify(ctx)
+
+
 @bp.get("/monitor-config.json")
 def monitor_config_get():
     """The UI-managed global heartbeat config (secret-free shape + values; this

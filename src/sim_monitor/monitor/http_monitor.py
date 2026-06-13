@@ -20,9 +20,10 @@ from sim_monitor.config.schema import MonitorConfig
 from sim_monitor.core.events import EventLog
 from sim_monitor.core.state_store import StateStore
 from sim_monitor.core.states import State
-from sim_monitor.monitor.placeholders import render_request
+from sim_monitor.monitor.placeholders import render, render_body_fields
 from sim_monitor.monitor.transport import make_session
 from sim_monitor.storage.db import Database
+from sim_monitor.system.host import collect_host_metrics
 
 log = logging.getLogger(__name__)
 
@@ -90,9 +91,23 @@ class HttpMonitor:
             if snapshot.state is State.CONNECTED and config.bind_cellular
             else None
         )
-        url, headers, body, unknown = render_request(
-            request.url, request.headers, request.body, snapshot.placeholder_context()
-        )
+        context = snapshot.placeholder_context()
+        context.update(collect_host_metrics())
+        context["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        # URL + headers are string-templated; the body is either built from
+        # structured fields (always-valid JSON) or string-templated for raw use.
+        url, _u1 = render(request.url, context)
+        headers, unknown = {}, set()
+        for k, v in request.headers.items():
+            headers[k], u = render(v, context)
+            unknown |= u
+        if request.body_fields:
+            body = render_body_fields(request.body_fields, context)
+            headers.setdefault("Content-Type", "application/json")
+        else:
+            body, u = render(request.body, context)
+            unknown |= u
+        unknown |= _u1
         if unknown:
             self.events.warning(
                 "monitor", f"unknown placeholders left intact: {sorted(unknown)}"

@@ -24,6 +24,7 @@ export const api = {
     `/api/profiles/${encodeURIComponent(name)}.json`,
   ),
   monitorConfig: () => getJSON<any>("/api/monitor-config.json"),
+  placeholders: () => getJSON<Record<string, any>>("/api/placeholders.json"),
 
   async saveMonitorConfig(cfg: Record<string, unknown>): Promise<boolean> {
     const res = await fetch("/api/monitor-config", {

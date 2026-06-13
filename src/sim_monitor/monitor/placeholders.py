@@ -8,6 +8,7 @@ context are replaced; everything else (including unknown tokens) is left as-is.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -27,6 +28,40 @@ def render(template: str, context: dict[str, Any]) -> tuple[str, set[str]]:
         return m.group(0)
 
     return TOKEN_RE.sub(_sub, template), unknown
+
+
+def render_body_fields(fields: list, context: dict[str, Any]) -> str:
+    """Assemble a JSON body from structured fields. Placeholder fields resolve
+    to their native-typed value (number stays a number, string a string) and
+    are OMITTED when unknown/None — so the result is always valid JSON. Static
+    fields contribute their literal string. `fields` items have .path/.value/
+    .kind (a BodyField or any object/dict with those keys)."""
+    out: dict[str, Any] = {}
+    for f in fields:
+        path = _attr(f, "path")
+        value = _attr(f, "value")
+        kind = _attr(f, "kind") or "placeholder"
+        if kind == "placeholder":
+            resolved = context.get(value)
+            if resolved is None:
+                continue  # unknown -> omit (keeps JSON valid)
+        else:
+            resolved = value
+        _set_path(out, path.split("."), resolved)
+    return json.dumps(out)
+
+
+def _attr(obj: Any, name: str) -> Any:
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name)
+
+
+def _set_path(root: dict, parts: list[str], value: Any) -> None:
+    node = root
+    for p in parts[:-1]:
+        node = node.setdefault(p, {})
+        if not isinstance(node, dict):  # a leaf already occupies this path
+            return
+    node[parts[-1]] = value
 
 
 def render_request(
