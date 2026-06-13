@@ -92,6 +92,7 @@ class Daemon:
         self._fallback_active = False       # on the built-in last-ditch default
         self._next_telemetry = 0.0          # monotonic time of next telemetry poll
         self._next_sms_poll = 0.0           # monotonic time of next SMS backstop poll
+        self._next_sim_reprobe = 0.0        # when to next nudge a SIM re-read
         self.global_monitor: MonitorConfig | None = None
         self._load_global_monitor()
 
@@ -308,11 +309,14 @@ class Daemon:
     # ------------------------------------------------------------------ SMS
 
     _SMS_SAFE_STATES = (S.CONNECTED, S.MODEM_FOUND, S.SIM_READY, S.DEGRADED)
-    SMS_POLL_SECONDS = 60  # backstop poll in case the +CMTI URC isn't captured
+    SMS_POLL_SECONDS = 60       # backstop poll in case the +CMTI URC isn't captured
+    SIM_REPROBE_SECONDS = 60    # how often to nudge a SIM re-read while none present
 
     def _maybe_fetch_sms(self) -> None:
         if self.driver is None or self.state not in self._SMS_SAFE_STATES:
             return
+        if not self.store.get().sim_present:
+            return  # no SIM -> no SMS (and avoids spamming errors)
         # Periodic backstop: new SMS surface even if the +CMTI URC went to a
         # port we don't own.
         if self.clock() >= self._next_sms_poll:
@@ -438,7 +442,20 @@ class Daemon:
         )
         if not sim.present:
             self.store.update(sim_present=False, iccid=None, imsi=None, last_error=sim.detail)
+            # A SIM-status URC (insertion) makes us re-probe right away; otherwise
+            # nudge periodically, since many modems don't auto-detect a hot swap.
+            if self._sim_refresh_pending:
+                self._sim_refresh_pending = False
+                self._next_sim_reprobe = 0
+            if self.clock() >= self._next_sim_reprobe:
+                self._next_sim_reprobe = self.clock() + self.SIM_REPROBE_SECONDS
+                try:
+                    self.driver.reprobe_sim()
+                    self.events.info("sim", "no SIM detected; re-probing modem for insertion")
+                except ModemError as e:
+                    self.events.warning("sim", f"SIM re-probe failed: {e}")
             return  # keep polling: SIM may be inserted any moment
+        self._next_sim_reprobe = 0  # reset so a future removal re-probes promptly
         self.store.update(sim_present=True, iccid=sim.iccid, imsi=sim.imsi)
         self._refresh_sim_name()
         self._record_identity("sim-ready")

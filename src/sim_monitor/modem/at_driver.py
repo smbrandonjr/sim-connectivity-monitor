@@ -121,6 +121,12 @@ class ATModemDriver(ModemDriver):
     def set_airplane(self, on: bool) -> None:
         self.at.execute("AT+CFUN=4" if on else "AT+CFUN=1", timeout=30)
 
+    def reprobe_sim(self) -> None:
+        # Minimal-functionality cycle: re-initializes the SIM session so a newly
+        # inserted card is detected without a full modem reboot.
+        self.at.execute("AT+CFUN=0", timeout=15)
+        self.at.execute("AT+CFUN=1", timeout=30)
+
     def clear_forbidden_plmn(self) -> None:
         # CRSM UPDATE BINARY on EF_FPLMN (28539): four empty 3-byte entries.
         self.at.execute('AT+CRSM=214,28539,0,0,12,"FFFFFFFFFFFFFFFFFFFFFFFF"', timeout=10)

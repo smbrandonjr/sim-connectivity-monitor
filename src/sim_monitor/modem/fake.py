@@ -47,6 +47,9 @@ class FakeModemDriver(ModemDriver):
         self.at_log: list[str] = []  # records init commands and resets
         self.event_reporting_enabled = False
         self._pending_urcs: list[UrcEvent] = []
+        # When set, the modem won't report an inserted SIM until reprobe_sim()
+        # (models a board without a SIM-detect pin — hot-swap needs a nudge).
+        self.needs_reprobe = False
         # In-memory SMS store: index -> (status, pdu_hex). sent_log records outbound.
         self._sms: dict[int, tuple[int, str]] = {}
         self._next_sms_index = 1
@@ -66,8 +69,8 @@ class FakeModemDriver(ModemDriver):
 
     def get_sim_status(self) -> SimStatus:
         self._check()
-        if not self.sim_present:
-            return SimStatus(present=False)
+        if not self.sim_present or self.needs_reprobe:
+            return SimStatus(present=False, detail="no SIM inserted")
         return SimStatus(present=True, iccid=self.iccid, imsi=self.imsi)
 
     def get_operator(self) -> str | None:
@@ -116,6 +119,11 @@ class FakeModemDriver(ModemDriver):
         self._check()
         self.at_log.append("RESET")
         self.airplane = False
+
+    def reprobe_sim(self) -> None:
+        self._check()
+        self.at_log.append("REPROBE_SIM")
+        self.needs_reprobe = False  # the nudge makes the inserted SIM visible
 
     def clear_forbidden_plmn(self) -> None:
         self._check()

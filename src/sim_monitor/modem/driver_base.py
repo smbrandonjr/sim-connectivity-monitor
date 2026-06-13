@@ -124,6 +124,11 @@ class ModemDriver(ABC):
     def set_airplane(self, on: bool) -> None: ...
 
     @abstractmethod
+    def reprobe_sim(self) -> None:
+        """Nudge the modem to re-read the SIM (a CFUN cycle). Hot-swapped SIMs
+        are often not auto-detected unless the board wires the SIM-detect pin."""
+
+    @abstractmethod
     def clear_forbidden_plmn(self) -> None:
         """Wipe the SIM's forbidden-PLMN list (EF_FPLMN).
 

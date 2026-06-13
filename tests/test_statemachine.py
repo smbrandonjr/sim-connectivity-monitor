@@ -202,6 +202,30 @@ class TestHotSwap:
         assert snap.sim_present is False
         assert snap.ip_address is None
 
+    def test_reinserted_sim_is_reprobed_and_reconnects(self, harness):
+        harness.run_until(State.CONNECTED)
+        # Remove the SIM -> detected, back to MODEM_FOUND.
+        harness.driver.sim_present = False
+        harness.tick()
+        assert harness.daemon.state is State.MODEM_FOUND
+        # Insert a SIM the modem won't report until it's re-probed (no detect pin).
+        harness.driver.sim_present = True
+        harness.driver.needs_reprobe = True
+        harness.tick(advance=61)  # past the reprobe interval -> nudge fires
+        assert "REPROBE_SIM" in harness.driver.at_log
+        assert harness.driver.needs_reprobe is False
+        harness.run_until(State.CONNECTED)  # now sees the SIM and reconnects
+
+    def test_no_sms_polling_without_sim(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.driver.sim_present = False
+        harness.tick()  # -> MODEM_FOUND, no SIM
+        before = list(harness.driver.at_log)
+        harness.driver.fail_all = False
+        harness.tick(advance=120)  # SMS backstop interval would have elapsed
+        # list_sms (AT+CMGF=0 / CMGL) must not be attempted without a SIM
+        assert "AT+CMGF=0" not in harness.driver.at_log[len(before):]
+
     def test_imsi_only_change_detected(self, harness):
         harness.run_until(State.CONNECTED)
         harness.driver.imsi = "310030000099999"  # same ICCID, new IMSI (profile swap)
