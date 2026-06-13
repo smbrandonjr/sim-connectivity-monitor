@@ -70,6 +70,35 @@ class TestDashboard:
         assert data["iccid"] == "8944500612345678901"
         assert data["ip_address"] == "10.170.42.7"
         assert data["active_profile"] == "web-test"
+        assert data["firmware"] == "FM100R-FAKE-01.001.01"
+        assert "sms_pending" in data
+
+
+class TestTimelineAndBundle:
+    def test_timeline_page_and_json(self, sim, client):
+        tick_until_connected(sim)
+        page = client.get("/timeline")
+        assert page.status_code == 200
+        rows = client.get("/api/timeline.json").get_json()
+        assert any(r["source"] == "event" for r in rows)
+
+    def test_bundle_downloads_with_filename(self, sim, client):
+        tick_until_connected(sim)
+        resp = client.get("/api/bundle.json")
+        assert resp.status_code == 200
+        assert "attachment" in resp.headers["Content-Disposition"]
+        data = resp.get_json()
+        assert data["schema"] == "sim-monitor/diagnostic-bundle@1"
+        assert data["modem"]["firmware"] == "FM100R-FAKE-01.001.01"
+        assert data["active_profile"]["name"] == "web-test"
+
+    def test_urcs_and_identity_json(self, sim, client):
+        tick_until_connected(sim)
+        sim.daemon.driver.ota_swap("8946420000000000123")
+        sim.daemon.tick()
+        assert client.get("/api/urcs.json").status_code == 200
+        identity = client.get("/api/identity.json").get_json()
+        assert any(row["reason"] == "ota-swap" for row in identity)
 
 
 class TestActions:

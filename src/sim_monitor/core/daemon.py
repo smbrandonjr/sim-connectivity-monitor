@@ -268,7 +268,15 @@ class Daemon:
             self.events.error("modem", f"modem stopped responding: {e}")
             self._drop_modem()
             return
-        self.store.update(vendor=identity.vendor, model=identity.model, imei=identity.imei)
+        firmware = None
+        try:
+            firmware = self.driver.get_firmware()
+        except ModemError:
+            pass  # cosmetic; don't block bring-up
+        self.store.update(
+            vendor=identity.vendor, model=identity.model, imei=identity.imei,
+            firmware=firmware,
+        )
         if not sim.present:
             self.store.update(sim_present=False, iccid=None, imsi=None, last_error=sim.detail)
             return  # keep polling: SIM may be inserted any moment

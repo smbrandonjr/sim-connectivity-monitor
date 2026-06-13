@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Timeline — sim-monitor{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>Timeline</h1>
+  <a class="button" href="{{ url_for('api.bundle') }}">Download diagnostic bundle</a>
+</div>
+<p class="muted">
+  A merged, time-ordered record of events, unsolicited modem messages (URCs), and SIM
+  identity changes — useful for understanding what happened during an OTA or outage.
+  The diagnostic bundle is a secret-free JSON snapshot (modem + firmware, current status,
+  active profile, and this history) you can share for side-by-side comparison.
+</p>
+<table>
+  <thead><tr><th>Time</th><th>Source</th><th>Kind</th><th>Detail</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td class="nowrap">{{ r.ts | ts }}</td>
+      <td><span class="badge badge-{{ {'urc':'warn','identity':'ok'}.get(r.source,'') }}">{{ r.source }}</span></td>
+      <td>{{ r.kind }}</td>
+      <td class="break">{{ r.detail }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">Nothing recorded yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

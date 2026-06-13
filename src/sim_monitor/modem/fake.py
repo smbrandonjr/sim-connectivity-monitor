@@ -54,6 +54,10 @@ class FakeModemDriver(ModemDriver):
         self._check()
         return self.identity
 
+    def get_firmware(self) -> str:
+        self._check()
+        return "FM100R-FAKE-01.001.01"
+
     def get_sim_status(self) -> SimStatus:
         self._check()
         if not self.sim_present:

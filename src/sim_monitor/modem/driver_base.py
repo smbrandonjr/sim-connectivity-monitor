@@ -73,6 +73,10 @@ class ModemDriver(ABC):
     def get_identity(self) -> ModemIdentity: ...
 
     @abstractmethod
+    def get_firmware(self) -> str:
+        """Firmware/revision string (AT+CGMR)."""
+
+    @abstractmethod
     def get_sim_status(self) -> SimStatus: ...
 
     @abstractmethod

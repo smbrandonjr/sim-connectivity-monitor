@@ -63,6 +63,9 @@ class ATModemDriver(ModemDriver):
         imei = self._parse(at_parser.parse_imei, self.at.execute("AT+CGSN"))
         return ModemIdentity(vendor=vendor, model=model, imei=imei)
 
+    def get_firmware(self) -> str:
+        return self._parse(at_parser.parse_cgmi, self.at.execute("AT+CGMR"))
+
     def get_sim_status(self) -> SimStatus:
         try:
             cpin = self._parse(at_parser.parse_cpin, self.at.execute("AT+CPIN?"))

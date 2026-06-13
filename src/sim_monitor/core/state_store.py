@@ -76,6 +76,7 @@ class Snapshot:
     state_since: float = field(default_factory=time.time)
     vendor: str | None = None
     model: str | None = None
+    firmware: str | None = None
     imei: str | None = None
     sim_present: bool = False
     iccid: str | None = None
