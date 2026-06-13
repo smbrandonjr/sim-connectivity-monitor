@@ -23,3 +23,5 @@ config/config.yaml
 config/profiles.d/*.yaml
 !config/profiles.d/00-hologram-default.yaml
 *.local.yaml
+
+/COMPANION-APP-THEME-GUIDE.md

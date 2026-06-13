@@ -10,6 +10,12 @@ class QuectelDriver(ATModemDriver):
     VENDOR_IDS = frozenset({0x2C7C})
     ICCID_COMMAND = "AT+QCCID"
     RESET_COMMAND = "AT+CFUN=1,1"
+    # Quectel SIM insertion/refresh URCs (+QSIMSTAT) are the key OTA signal.
+    EVENT_REPORTING_COMMANDS = (
+        *ATModemDriver.EVENT_REPORTING_COMMANDS,
+        "AT+QSIMSTAT=1",          # report SIM (un)insertion / refresh as +QSIMSTAT
+        'AT+QINDCFG="all",1',     # enable all URC indications
+    )
     DIAGNOSTIC_COMMANDS = [
         *ATModemDriver.DIAGNOSTIC_COMMANDS,
         "AT+QNWINFO",                 # serving network: RAT, operator, band

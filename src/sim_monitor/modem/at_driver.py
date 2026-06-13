@@ -18,6 +18,7 @@ from sim_monitor.modem.driver_base import (
     ModemError,
     ModemIdentity,
     SimStatus,
+    UrcEvent,
 )
 
 log = logging.getLogger(__name__)
@@ -34,8 +35,21 @@ class ATModemDriver(ModemDriver):
     ICCID_COMMAND = "AT+CCID"
     RESET_COMMAND = "AT+CFUN=1,1"
 
+    # Best-effort URC enablers; vendor subclasses append quirks. Each is sent
+    # tolerantly — a modem that rejects one still gets the rest.
+    EVENT_REPORTING_COMMANDS = (
+        "AT+CMEE=2",          # verbose error text
+        "AT+CREG=2",          # registration URCs with location
+        "AT+CGREG=2",
+        "AT+CEREG=2",
+        "AT+CTZR=1",          # network time-zone (NITZ) URCs
+        'AT+CNMI=2,1,0,0,0',  # new SMS -> +CMTI indication (store, don't dump)
+    )
+
     def __init__(self, channel: ATChannel) -> None:
         self.at = channel
+        self._urc_lines: list[str] = []
+        channel.set_urc_handler(self._urc_lines.append)
 
     def _parse(self, parser, lines):
         try:
@@ -113,3 +127,24 @@ class ATModemDriver(ModemDriver):
 
     def execute_raw(self, command: str, timeout: float | None = None) -> list[str]:
         return self.at.execute(command, timeout=timeout or 10)
+
+    def enable_event_reporting(self) -> None:
+        for command in self.EVENT_REPORTING_COMMANDS:
+            try:
+                self.at.execute(command, timeout=5)
+            except ModemError as e:
+                log.debug("event-reporting command %s not supported: %s", command, e)
+
+    def poll_events(self) -> list[UrcEvent]:
+        try:
+            self.at.drain_urcs()  # pull any URCs buffered during idle gaps
+        except ModemError as e:
+            log.debug("URC drain failed: %s", e)
+        if not self._urc_lines:
+            return []
+        lines, self._urc_lines = self._urc_lines, []
+        events = []
+        for line in lines:
+            kind, fields = at_parser.classify_urc(line)
+            events.append(UrcEvent(raw=line, kind=kind, fields=fields))
+        return events

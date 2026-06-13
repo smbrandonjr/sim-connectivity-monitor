@@ -3,6 +3,8 @@ import pytest
 from sim_monitor.modem.at_parser import (
     ActualPdpContext,
     ATParseError,
+    classify_urc,
+    parse_cereg,
     parse_cgdcont,
     parse_cgmi,
     parse_cops,
@@ -117,3 +119,72 @@ def test_pdp_type_roundtrip():
     assert pdp_type_to_at("IPv4") == "IP"
     assert pdp_type_to_at("IPv6") == "IPV6"
     assert pdp_type_to_at("IPv4v6") == "IPV4V6"
+
+
+class TestClassifyUrc:
+    def test_new_sms_cmti(self):
+        kind, fields = classify_urc('+CMTI: "ME",3')
+        assert kind == "new_sms"
+        assert fields == {"storage": "ME", "index": 3}
+
+    def test_new_sms_unquoted_storage(self):
+        kind, fields = classify_urc("+CMTI: SM,12")
+        assert kind == "new_sms"
+        assert fields["index"] == 12
+
+    def test_sim_status_qsimstat(self):
+        kind, fields = classify_urc("+QSIMSTAT: 1,1")
+        assert kind == "sim_status"
+        assert fields == {"enabled": 1, "inserted": 1}
+
+    def test_sim_removed(self):
+        kind, fields = classify_urc("+QSIMSTAT: 1,0")
+        assert kind == "sim_status"
+        assert fields["inserted"] == 0
+
+    def test_registration_simple(self):
+        kind, fields = classify_urc("+CEREG: 5")
+        assert kind == "registration"
+        assert fields["stat"] == 5
+        assert fields["label"] == "registered-roaming"
+        assert fields["domain"] == "CEREG"
+
+    def test_registration_with_location(self):
+        kind, fields = classify_urc('+CEREG: 1,"1A2B","0144C3D5",7')
+        assert kind == "registration"
+        assert fields["stat"] == 1
+        assert fields["tac"] == "1A2B"
+        assert fields["ci"] == "0144C3D5"
+
+    def test_creg_denied(self):
+        _, fields = classify_urc("+CREG: 3")
+        assert fields["label"] == "denied"
+
+    def test_nitz(self):
+        kind, _ = classify_urc('+CTZV: "26/06/13,10:30:00-20"')
+        assert kind == "nitz"
+
+    def test_ring_and_no_carrier(self):
+        assert classify_urc("RING")[0] == "ring"
+        assert classify_urc("NO CARRIER")[0] == "no_carrier"
+
+    def test_unknown_keeps_raw(self):
+        kind, fields = classify_urc("+SOMETHING: weird")
+        assert kind == "unknown"
+        assert fields["raw"] == "+SOMETHING: weird"
+
+
+class TestParseCereg:
+    def test_solicited_with_location(self):
+        result = parse_cereg(['+CEREG: 2,1,"1A2B","0144C3D5",7'])
+        assert result["stat"] == 1
+        assert result["label"] == "registered-home"
+        assert result["tac"] == "1A2B"
+
+    def test_solicited_stat_only(self):
+        result = parse_cereg(["+CEREG: 0,5"])
+        assert result["stat"] == 5
+        assert result["tac"] is None
+
+    def test_missing(self):
+        assert parse_cereg(["OK"]) is None

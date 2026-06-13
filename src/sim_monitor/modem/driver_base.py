@@ -36,6 +36,19 @@ class SimStatus:
     detail: str | None = None  # human-readable reason when not usable (e.g. "SIM PIN required")
 
 
+@dataclass(frozen=True)
+class UrcEvent:
+    """A classified unsolicited result code from the modem.
+
+    kind ∈ {new_sms, sms_deliver, sim_status, registration, nitz, ring,
+    no_carrier, unknown}; `fields` carries the parsed details; `raw` is the
+    original line (always recorded for forensics)."""
+
+    raw: str
+    kind: str
+    fields: dict
+
+
 class ModemDriver(ABC):
     """One instance per detected modem."""
 
@@ -94,6 +107,17 @@ class ModemDriver(ABC):
 
     @abstractmethod
     def run_init_commands(self, commands: list[str]) -> None: ...
+
+    @abstractmethod
+    def enable_event_reporting(self) -> None:
+        """Turn on verbose URCs (new-SMS, SIM status, registration, NITZ).
+
+        Best-effort: unsupported commands are ignored so one missing quirk
+        never blocks bring-up."""
+
+    @abstractmethod
+    def poll_events(self) -> list[UrcEvent]:
+        """Return (and clear) URCs captured since the last call."""
 
 
 class ModemDetector(ABC):

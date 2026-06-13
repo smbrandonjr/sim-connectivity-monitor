@@ -16,6 +16,7 @@ from sim_monitor.modem.driver_base import (
     ModemError,
     ModemIdentity,
     SimStatus,
+    UrcEvent,
 )
 
 DEFAULT_ICCID = "8944500612345678901"
@@ -42,6 +43,8 @@ class FakeModemDriver(ModemDriver):
         self.fail_all = False  # every call raises ModemError (port wedged)
         self.fallback_iccid: str | None = None  # applied when airplane mode ends
         self.at_log: list[str] = []  # records init commands and resets
+        self.event_reporting_enabled = False
+        self._pending_urcs: list[UrcEvent] = []
 
     def _check(self) -> None:
         if self.fail_all:
@@ -117,6 +120,28 @@ class FakeModemDriver(ModemDriver):
             ],
         }
         return canned.get(command, [f"{command}: simulated OK"])
+
+    def enable_event_reporting(self) -> None:
+        self._check()
+        self.event_reporting_enabled = True
+
+    def poll_events(self) -> list[UrcEvent]:
+        self._check()
+        events, self._pending_urcs = self._pending_urcs, []
+        return events
+
+    # ── test/sim scripting helpers ──────────────────────────────────────────
+    def push_urc(self, kind: str, fields: dict | None = None, raw: str = "") -> None:
+        """Queue a URC the daemon will see on its next poll_events()."""
+        self._pending_urcs.append(UrcEvent(raw=raw or kind, kind=kind, fields=fields or {}))
+
+    def ota_swap(self, new_iccid: str, new_imsi: str = "310030000000001") -> None:
+        """Simulate a Hologram OTA: profile swapped to a new ICCID/IMSI and the
+        modem emits a SIM-refresh URC — exactly the field scenario where the
+        old code stayed CONNECTED on a stale ICCID."""
+        self.iccid = new_iccid
+        self.imsi = new_imsi
+        self.push_urc("sim_status", {"enabled": 1, "inserted": 1}, raw="+QSIMSTAT: 1,1")
 
 
 class FakeDetector(ModemDetector):

@@ -65,6 +65,9 @@ class FakeChannel:
         self.baud = baud
         self.executed = []
 
+    def set_urc_handler(self, handler):
+        pass
+
     def open(self):
         pass
 

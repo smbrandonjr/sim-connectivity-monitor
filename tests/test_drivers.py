@@ -13,6 +13,7 @@ class ScriptedChannel:
         self.responses = responses or {}
         self.executed: list[str] = []
         self.closed = False
+        self.urc_handler = None
 
     def execute(self, command, timeout=None):
         self.executed.append(command)
@@ -22,6 +23,12 @@ class ScriptedChannel:
         if isinstance(result, Exception):
             raise result
         return result
+
+    def set_urc_handler(self, handler):
+        self.urc_handler = handler
+
+    def drain_urcs(self):
+        pass
 
     def open(self):
         pass
@@ -172,3 +179,38 @@ class TestControl:
         channel = ScriptedChannel({'AT+QCFG="nwscanmode",0': []})
         QuectelDriver(channel).run_init_commands(['AT+QCFG="nwscanmode",0'])
         assert channel.executed == ['AT+QCFG="nwscanmode",0']
+
+
+class TestUrcLifecycle:
+    def test_enable_event_reporting_is_best_effort(self):
+        # Channel ERRORs on every unknown command; enabling must not raise.
+        channel = ScriptedChannel({"AT+CMEE=2": []})  # only one supported
+        QuectelDriver(channel).enable_event_reporting()
+        assert "AT+CMEE=2" in channel.executed
+        assert 'AT+QSIMSTAT=1' in channel.executed  # attempted even though it ERRORs
+
+    def test_quectel_enables_sim_status_urc(self):
+        channel = ScriptedChannel(dict.fromkeys(QuectelDriver.EVENT_REPORTING_COMMANDS, []))
+        QuectelDriver(channel).enable_event_reporting()
+        assert "AT+QSIMSTAT=1" in channel.executed
+        assert 'AT+QINDCFG="all",1' in channel.executed
+
+    def test_poll_events_classifies_captured_urcs(self):
+        channel = ScriptedChannel()
+        driver = QuectelDriver(channel)
+        # Simulate the channel handing URC lines to the driver's handler.
+        driver._urc_lines.extend(['+CMTI: "ME",2', "+QSIMSTAT: 1,1"])
+        events = driver.poll_events()
+        assert [e.kind for e in events] == ["new_sms", "sim_status"]
+        assert events[0].fields["index"] == 2
+        assert driver.poll_events() == []  # cleared after read
+
+    def test_driver_registers_handler_and_classifies_via_channel(self):
+        channel = ScriptedChannel()
+        driver = QuectelDriver(channel)
+        assert channel.urc_handler is not None
+        channel.urc_handler('+CMTI: "ME",9')  # the channel calls this on a URC line
+        events = driver.poll_events()
+        assert len(events) == 1
+        assert events[0].kind == "new_sms"
+        assert events[0].fields["index"] == 9

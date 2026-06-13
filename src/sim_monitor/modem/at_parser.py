@@ -134,3 +134,98 @@ def parse_cgdcont(lines: list[str]) -> list[ActualPdpContext]:
 def pdp_type_to_at(pdp_type: str) -> str:
     """Map a schema pdp_type (IPv4/IPv6/IPv4v6) to the AT+CGDCONT string."""
     return _PDP_TYPE_TO_AT[pdp_type]
+
+
+# ── URC classification ──────────────────────────────────────────────────────
+# Map an unsolicited result code line to a (kind, fields) pair. Pure; the driver
+# wraps the result in a UrcEvent and the daemon reacts (fetch SMS, re-evaluate
+# the SIM after a refresh, record registration changes, etc.).
+
+# 3GPP +CxREG registration state -> human label.
+_REG_STATE = {
+    0: "not-registered",
+    1: "registered-home",
+    2: "searching",
+    3: "denied",
+    4: "unknown",
+    5: "registered-roaming",
+}
+
+
+def registration_label(stat: int) -> str:
+    return _REG_STATE.get(stat, f"state-{stat}")
+
+
+def classify_urc(line: str) -> tuple[str, dict]:
+    """Classify one unsolicited line. Returns (kind, fields).
+
+    kinds: new_sms, sms_deliver, sim_status, registration, nitz, ring,
+    no_carrier, unknown.
+    """
+    line = line.strip()
+    upper = line.upper()
+
+    # New SMS stored on the modem: +CMTI: "ME",3
+    m = re.match(r'\+CMTI:\s*"?([A-Z]+)"?\s*,\s*(\d+)', line, re.I)
+    if m:
+        return "new_sms", {"storage": m.group(1).upper(), "index": int(m.group(2))}
+
+    # Directly-delivered SMS (+CMT) — header line; body follows on next line.
+    if upper.startswith("+CMT:") or upper.startswith("+CDS:"):
+        return "sms_deliver", {"header": line}
+
+    # Quectel SIM insertion / status change (a SIM refresh shows up here).
+    m = re.match(r"\+QSIMSTAT:\s*(\d+)\s*,\s*(\d+)", line)
+    if m:
+        return "sim_status", {"enabled": int(m.group(1)), "inserted": int(m.group(2))}
+    if upper.startswith("+QUSIM:"):
+        return "sim_status", {"raw": line}
+
+    # Registration change: +CEREG: <stat>[,...] / +CREG: / +CGREG:
+    m = re.match(r"\+(CREG|CGREG|CEREG):\s*(\d+)(?:\s*,\s*\d+)?\s*$", line, re.I)
+    if m:
+        # URC form is "+CEREG: <stat>"; the n,<stat> solicited form is handled
+        # by parse_cereg. A trailing ,<n> (no stat) is also just <stat>.
+        return "registration", {
+            "domain": m.group(1).upper(),
+            "stat": int(m.group(2)),
+            "label": registration_label(int(m.group(2))),
+        }
+    # Verbose URC form with location: +CEREG: <stat>,"<tac>","<ci>",<act>
+    m = re.match(
+        r'\+(CREG|CGREG|CEREG):\s*(\d+)\s*,\s*"?([0-9A-Fa-f]*)"?\s*,\s*"?([0-9A-Fa-f]*)"?',
+        line,
+    )
+    if m and upper.count(",") >= 2:
+        return "registration", {
+            "domain": m.group(1).upper(),
+            "stat": int(m.group(2)),
+            "label": registration_label(int(m.group(2))),
+            "tac": m.group(3) or None,
+            "ci": m.group(4) or None,
+        }
+
+    if upper.startswith(("+CTZV:", "+CTZE:", "+CTZDST:", "*PSUTTZ", "+QLTS")):
+        return "nitz", {"raw": line}
+    if upper == "RING":
+        return "ring", {}
+    if upper.startswith("NO CARRIER"):
+        return "no_carrier", {}
+    return "unknown", {"raw": line}
+
+
+def parse_cereg(lines: list[str]) -> dict | None:
+    """Parse a solicited AT+CEREG? reply: +CEREG: <n>,<stat>[,"<tac>","<ci>"...]."""
+    for line in lines:
+        m = re.match(
+            r'\+CEREG:\s*\d+\s*,\s*(\d+)(?:\s*,\s*"?([0-9A-Fa-f]*)"?\s*,\s*"?([0-9A-Fa-f]*)"?)?',
+            line,
+        )
+        if m:
+            return {
+                "stat": int(m.group(1)),
+                "label": registration_label(int(m.group(1))),
+                "tac": m.group(2) or None,
+                "ci": m.group(3) or None,
+            }
+    return None
