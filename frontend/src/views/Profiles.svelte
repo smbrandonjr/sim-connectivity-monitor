@@ -99,13 +99,46 @@
   }
   async function release() { await api.cmd("release-force"); setTimeout(load, 600); }
 
+  let fileInput: HTMLInputElement;
+  async function onImportFile(e: Event) {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    let bundle: unknown;
+    try {
+      bundle = JSON.parse(await file.text());
+    } catch {
+      toast("not a valid JSON export file", "error");
+      return;
+    }
+    const result = await api.importProfiles(bundle);
+    if (result) {
+      toast(`imported ${result.imported} profile(s)` +
+        (result.errors.length ? `, ${result.errors.length} skipped` : ""),
+        result.errors.length ? "info" : "ok");
+      for (const er of result.errors) toast(`skipped ${er.name}: ${er.error}`, "error");
+      setTimeout(load, 600);
+    }
+    fileInput.value = "";  // allow re-importing the same file
+  }
+
   onMount(load);
 </script>
 
 <div class="row">
   <h1>Profiles</h1>
-  {#if !editor}<button class="ui-btn ui-btn-primary" on:click={openNew}>New profile</button>{/if}
+  {#if !editor}
+    <button class="ui-btn ui-btn-primary" on:click={openNew}>New profile</button>
+    <span class="nav-spacer"></span>
+    <a class="ui-btn ui-btn-sm" href="/api/profiles/export.json" title="Download all profiles as a JSON bundle">Export all</a>
+    <button class="ui-btn ui-btn-sm" on:click={() => fileInput.click()} title="Import profiles from an exported bundle">Import</button>
+    <input type="file" accept="application/json,.json" bind:this={fileInput} on:change={onImportFile} style="display:none" />
+  {/if}
 </div>
+{#if !editor}
+  <p class="muted">Export carries every profile (including any APN credentials) — keep the file
+    private; it's meant for copying your set onto other monitors, not for git. Import adds new
+    profiles and overwrites same-named ones.</p>
+{/if}
 
 {#if data.forced}
   <div class="ui-card alert">

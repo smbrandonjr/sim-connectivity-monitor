@@ -241,6 +241,52 @@ def profiles_list():
     })
 
 
+@bp.get("/profiles/export.json")
+def profiles_export():
+    """Download all profiles as one JSON bundle — for copying a device's full
+    profile set onto other monitors without committing them to git."""
+    import json
+
+    app = sim()
+    profiles, _ = loader.load_profiles(app.config.profiles_dir)
+    bundle = {
+        "schema": "sim-monitor/profiles@1",
+        "exported_at": time.time(),
+        "profiles": [p.model_dump(mode="json") for p in profiles],
+    }
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    fname = f"sim-monitor-profiles-{stamp}.json"
+    return Response(
+        json.dumps(bundle, indent=2),
+        mimetype="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@bp.post("/profiles/import")
+def profiles_import():
+    """Import profiles from an exported bundle. Adds new ones and overwrites
+    same-named ones; other existing profiles are left untouched."""
+    app = sim()
+    body = _body()
+    items = body.get("profiles") if isinstance(body, dict) else body
+    if not isinstance(items, list):
+        return jsonify({"error": "expected a profiles bundle (or list of profiles)"}), 400
+    imported, errors = 0, []
+    for raw in items:
+        try:
+            profile = Profile.model_validate(raw)
+        except (ValidationError, TypeError) as e:
+            errors.append({"name": (raw or {}).get("name", "?") if isinstance(raw, dict) else "?",
+                           "error": str(e)})
+            continue
+        loader.save_profile(app.config.profiles_dir, profile)
+        imported += 1
+    if imported:
+        app.commands.put(cmd.ReloadProfiles())
+    return jsonify({"imported": imported, "errors": errors})
+
+
 @bp.get("/profiles/<name>.json")
 def profile_get(name: str):
     app = sim()

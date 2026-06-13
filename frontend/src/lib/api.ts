@@ -73,4 +73,18 @@ export const api = {
     const res = await fetch(`/api/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
     return res.ok;
   },
+
+  async importProfiles(bundle: unknown): Promise<{ imported: number; errors: any[] } | null> {
+    const res = await fetch("/api/profiles/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bundle),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(data.error || "import failed", "error");
+      return null;
+    }
+    return data;
+  },
 };

@@ -282,3 +282,46 @@ class TestJsonProfileApi:
     def test_create_duplicate_400(self, sim, client):
         resp = client.post("/api/profiles", json={"yaml": PROFILE_YAML})
         assert resp.status_code == 400
+
+    def test_export_then_import_roundtrip(self, sim, client):
+        # Add a second profile, export the set.
+        extra = (
+            "name: extra\nmatch: {iccid_patterns: ['8946*'], priority: 30}\n"
+            "pdp_contexts: [{cid: 1, apn: vzwinternet, bearer: true}]\n"
+        )
+        client.post("/api/profiles", json={"yaml": extra})
+        bundle = client.get("/api/profiles/export.json")
+        assert bundle.status_code == 200
+        assert "attachment" in bundle.headers["Content-Disposition"]
+        data = bundle.get_json()
+        assert data["schema"] == "sim-monitor/profiles@1"
+        names = {p["name"] for p in data["profiles"]}
+        assert {"web-test", "extra"} <= names
+
+        # Import the bundle into a fresh device.
+        from sim_monitor.config.loader import save_profile  # noqa: F401  (clarity)
+        for f in (sim.config.profiles_dir).glob("*.yaml"):
+            f.unlink()
+        result = client.post("/api/profiles/import", json=data).get_json()
+        assert result["imported"] == len(data["profiles"])
+        assert result["errors"] == []
+        profiles, _ = load_profiles(sim.config.profiles_dir)
+        assert {"web-test", "extra"} <= {p.name for p in profiles}
+
+    def test_import_reports_bad_profiles(self, sim, client):
+        result = client.post("/api/profiles/import", json={
+            "profiles": [
+                {"name": "good", "match": {"iccid_patterns": ["*"], "priority": 1},
+                 "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}]},
+                {"name": "bad", "pdp_contexts": []},  # invalid
+            ]
+        }).get_json()
+        assert result["imported"] == 1
+        assert len(result["errors"]) == 1 and result["errors"][0]["name"] == "bad"
+
+    def test_import_accepts_bare_list(self, sim, client):
+        result = client.post("/api/profiles/import", json=[
+            {"name": "fromlist", "match": {"iccid_patterns": ["*"], "priority": 9},
+             "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}]},
+        ]).get_json()
+        assert result["imported"] == 1
