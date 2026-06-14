@@ -22,6 +22,7 @@ class ConnectionState:
     active: bool
     interface: str | None = None
     ip_address: str | None = None
+    gateway: str | None = None
     # NM is mid-activation (registering/getting a bearer). The daemon must
     # WAIT, not retry: re-running `connection up` cancels registration.
     activating: bool = False

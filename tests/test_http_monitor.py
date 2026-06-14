@@ -195,6 +195,31 @@ def test_body_fields_produce_valid_typed_json(env):
     assert sent["meta"]["tags"] == "warehouse"
 
 
+def test_public_ip_fetched_bound_to_interface(env):
+    monitor, session, _ = env
+    session.status_code = 200
+
+    class IpResp:
+        ok = True
+        text = "203.0.113.45\n"
+
+    session.request = lambda *a, **k: None  # unused
+    session.get = lambda url, timeout=None: IpResp()
+    monitor._maybe_public_ip()
+    assert monitor.store.get().public_ip == "203.0.113.45"
+    assert session.bound_interfaces[-1] == "wwan0"  # bound to cellular
+
+
+def test_public_ip_skipped_when_not_connected(env):
+    monitor, session, _ = env
+    monitor.store.set_state(State.DEGRADED)
+    monitor._next_public_ip = 0
+    called = []
+    session.get = lambda *a, **k: called.append(1)
+    monitor._maybe_public_ip()
+    assert called == []
+
+
 def test_send_when_degraded_default_on():
     assert PROFILE.monitor.send_when_degraded is True
 

@@ -27,6 +27,9 @@ from sim_monitor.system.host import collect_host_metrics
 
 log = logging.getLogger(__name__)
 
+PUBLIC_IP_URL = "https://api.ipify.org"
+PUBLIC_IP_INTERVAL = 300  # seconds
+
 
 class HttpMonitor:
     def __init__(
@@ -43,6 +46,7 @@ class HttpMonitor:
         self.get_config = get_config
         self.trigger = trigger
         self._next_due: float | None = None
+        self._next_public_ip = 0.0
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -52,6 +56,24 @@ class HttpMonitor:
             if forced:
                 self.trigger.clear()
             self._iteration(forced)
+            self._maybe_public_ip()
+
+    def _maybe_public_ip(self) -> None:
+        """Resolve the cellular public IP periodically (bound to the cellular
+        interface so it's the SIM's address, not the LAN's)."""
+        if time.monotonic() < self._next_public_ip:
+            return
+        snapshot = self.store.get()
+        if snapshot.state is not State.CONNECTED:
+            return
+        self._next_public_ip = time.monotonic() + PUBLIC_IP_INTERVAL
+        try:
+            resp = make_session(snapshot.interface).get(PUBLIC_IP_URL, timeout=10)
+            ip = resp.text.strip()
+            if resp.ok and ip and len(ip) <= 45:
+                self.store.update(public_ip=ip)
+        except requests.RequestException as e:
+            log.debug("public IP lookup failed: %s", e)
 
     def _iteration(self, forced: bool) -> None:
         config = self.get_config()

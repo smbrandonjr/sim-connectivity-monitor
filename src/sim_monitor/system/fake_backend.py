@@ -74,7 +74,10 @@ class FakeBackend(NetworkBackend):
             self.drop_connection = False
         if not self.connected:
             return ConnectionState(active=False)
-        return ConnectionState(active=True, interface=self.interface, ip_address=self.ip_address)
+        return ConnectionState(
+            active=True, interface=self.interface, ip_address=self.ip_address,
+            gateway="10.170.42.8",
+        )
 
     def verify_routing(self, profile: Profile) -> bool:
         return self.routing_ok

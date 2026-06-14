@@ -124,6 +124,11 @@ class TestHappyPath:
         assert snap.signal_rssi == -77
         assert snap.routing_ok is True
 
+    def test_gateway_surfaced(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.tick()
+        assert harness.store.get().gateway == "10.170.42.8"
+
     def test_telemetry_captured_and_stored(self, harness):
         harness.run_until(State.CONNECTED)
         harness.tick(advance=60)  # past telemetry interval

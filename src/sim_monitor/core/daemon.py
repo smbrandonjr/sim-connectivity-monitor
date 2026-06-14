@@ -672,6 +672,7 @@ class Daemon:
             signal_percent=signal.percent if signal else None,
             interface=conn.interface,
             ip_address=conn.ip_address,
+            gateway=conn.gateway,
         )
         self._maybe_poll_telemetry()
 
@@ -861,6 +862,6 @@ class Daemon:
         self._go(
             S.NO_MODEM,
             sim_present=False, iccid=None, imsi=None, sim_name=None,
-            interface=None, ip_address=None, active_profile=None,
-            vendor=None, model=None, imei=None,
+            interface=None, ip_address=None, gateway=None, public_ip=None,
+            active_profile=None, vendor=None, model=None, imei=None,
         )

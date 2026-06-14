@@ -89,7 +89,8 @@ class Nmcli:
         try:
             out = self._run(
                 ["nmcli", "-t", "-f",
-                 "GENERAL.STATE,GENERAL.DEVICES,IP4.ADDRESS", "connection", "show", name]
+                 "GENERAL.STATE,GENERAL.DEVICES,IP4.ADDRESS,IP4.GATEWAY",
+                 "connection", "show", name]
             )
         except BackendError:
             return ConnectionState(active=False)
@@ -106,6 +107,7 @@ class Nmcli:
             active=True,
             interface=self.ip_interface(device) if device else None,
             ip_address=ip_address,
+            gateway=fields.get("IP4.GATEWAY") or None,
         )
 
     def ip_interface(self, device: str) -> str:

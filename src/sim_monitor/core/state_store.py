@@ -88,6 +88,8 @@ class Snapshot:
     signal_percent: int | None = None
     interface: str | None = None
     ip_address: str | None = None
+    gateway: str | None = None
+    public_ip: str | None = None
     apn: str | None = None
     routing_ok: bool | None = None
     active_profile: str | None = None
@@ -122,6 +124,8 @@ class Snapshot:
             "rssi": self.signal_rssi,          # alias
             "signal_percent": self.signal_percent,
             "ip_address": self.ip_address,
+            "gateway": self.gateway,
+            "public_ip": self.public_ip,
             "interface": self.interface,
             "apn": self.apn,
             "hostname": socket.gethostname(),

@@ -54,6 +54,8 @@
     { group: "meta", label: "imsi", path: "meta.imsi", value: "imsi" },
     { group: "meta", label: "apn", path: "meta.apn", value: "apn" },
     { group: "meta", label: "ip", path: "meta.ip", value: "ip_address" },
+    { group: "meta", label: "gateway", path: "meta.gateway", value: "gateway" },
+    { group: "meta", label: "public_ip", path: "meta.public_ip", value: "public_ip" },
     { group: "meta", label: "interface", path: "meta.interface", value: "interface" },
     { group: "meta", label: "registration", path: "meta.registration", value: "registration" },
     { group: "meta", label: "status_message", path: "meta.status_message", value: "status_message" },

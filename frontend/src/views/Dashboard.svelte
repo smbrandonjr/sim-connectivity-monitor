@@ -67,6 +67,8 @@
       <dl>
         <dt>Interface</dt><dd>{s.interface ?? "—"}</dd>
         <dt>IP address</dt><dd><Copyable value={s.ip_address} /></dd>
+        <dt>Gateway</dt><dd><Copyable value={s.gateway} /></dd>
+        <dt>Public IP</dt><dd><Copyable value={s.public_ip} /></dd>
         <dt>APN</dt><dd>{s.apn ?? "—"}</dd>
         <dt>Default route</dt><dd>{s.routing_ok == null ? "—" : s.routing_ok ? "cellular" : "not cellular"}</dd>
         <dt>Last error</dt><dd style="color:var(--status-red)">{s.last_error ?? "—"}</dd>
