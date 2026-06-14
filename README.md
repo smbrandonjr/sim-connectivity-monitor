@@ -13,24 +13,17 @@ Install it on a Pi, plug in a modem, and it will:
   **default, prioritized route** (LAN/SSH access stays intact)
 - Send a configurable **HTTP heartbeat** out the cellular interface with SIM-specific
   placeholders (`{iccid}`, `{imei}`, `{signal_rssi}`, …)
-- Serve a **LAN web UI** for live status, profile management, and manual actions
+- Serve a **LAN web UI** for live status, profile management, SMS (inbox/send),
+  on-device network tools (host/port scan, reachability, traceroute), and manual actions
 - Support **Hologram fallback/outage-protection testing** (airplane mode for ~15 min so the
   SIM applet switches profiles, then reconnect and observe the new identity)
 - Handle **hot SIM swaps** (ICCID change → automatic re-match and reconnect)
 - Recover failures with an escalation ladder (reconnect → modem disable/enable → AT reset →
   USB power-cycle) — without ever rebooting the Pi or thrashing in restart loops
 
-## Status
-
-- [x] Phase 0 — project scaffolding, config schema / ICCID matcher
-- [x] Phase 1 — core engine (state machine, drivers, supervisor) against a simulated modem
-- [x] Phase 2 — web UI
-- [x] Phase 3 — hardware integration code (mmcli/nmcli wrappers, AT channel, vendor drivers, udev, installer)
-- [ ] Phase 4 — validate routing, monitor egress, fallback test on real hardware
-- [ ] Phase 5 — resilience hardening on real hardware (USB power-cycle, watchdog tuning)
-
-All logic is unit-tested on any OS; phases 4–5 are validation passes on a real Pi + modem
-using the [smoke-test checklist](#smoke-test-checklist) below.
+Runs on real hardware (Raspberry Pi + USB modem) and on any OS via simulate mode. The
+pure logic is unit-tested everywhere; the [smoke-test checklist](#smoke-test-checklist)
+below is the pass to run when bringing up a new modem model or OS image.
 
 ---
 
@@ -98,10 +91,16 @@ journalctl -u sim-monitor -f  # watch it walk NO_MODEM -> ... -> CONNECTED
 
 Browse to `http://<pi-address>:8080` from your LAN.
 
-- **Dashboard** — live state, ICCID/IMEI/operator/signal, IP, default-route check,
+- **Dashboard** — live state, ICCID/IMEI/operator/signal, IP / gateway / public IP,
+  default-route check, serving-cell details (RAT/band/cell ID), signal telemetry charts,
   and action buttons (reconnect, reset modem, run monitor probe, fallback test).
 - **Profiles** — view/create/edit/delete profiles, force one for testing.
-- **Monitor** — heartbeat history. **Events** — everything the daemon did.
+- **Messages** — SMS inbox and compose/send over the modem.
+- **Monitoring** — heartbeat configuration and recent heartbeat history.
+- **Scan** — network tools (host discovery, port scan, reachability checks,
+  traceroute), optionally bound to a specific interface.
+- **Timeline** — everything the daemon did (events, URCs, identity changes).
+- **Diagnostics** — AT command reference and ad-hoc AT command execution.
 
 > The UI has no authentication — keep it LAN-only. Don't port-forward it.
 
@@ -135,10 +134,20 @@ endpoint for all SIMs, with the recent heartbeat history shown below the form. (
 may override it for one SIM by enabling its own `monitor` block.) Configure the URL,
 method, headers, body, interval, and the egress behavior:
 
-Available placeholders (usable in URL, headers, body): `{iccid} {imei} {imsi} {operator}
-{signal_rssi}
-{signal_percent} {ip_address} {interface} {hostname} {timestamp} {state} {profile_name}
-{status} {status_message}`.
+Available placeholders (usable in URL, headers, body). Unknown values render empty /
+are omitted from structured bodies:
+
+- **Identity & state:** `{iccid} {imei} {imsi} {operator} {registration} {state}
+  {profile_name} {sim_name} {status} {status_message} {last_error}`
+- **Modem:** `{vendor} {model} {modem_model} {firmware}`
+- **Signal:** `{signal_rssi}` (alias `{rssi}`) `{signal_percent}`
+- **Serving cell (when reported):** `{rat} {rsrp} {rsrq} {sinr} {band} {earfcn}
+  {cell_id} {tac} {pci} {mcc} {mnc} {operator_numeric} {channel}`
+- **Network:** `{ip_address} {gateway} {public_ip} {interface} {apn}` plus per-interface
+  IPs `{eth0_ip} {wlan0_ip} {wwan0_ip}` (only for interfaces that are up)
+- **Host:** `{hostname} {uptime_s} {cpu_load} {mem_free_mb} {temperature_c}`
+  (host metrics are Linux-only)
+- **Timing:** `{timestamp} {sampled_at}`
 
 **Heartbeats while cellular is down:** probes don't stop when the connection drops.
 While cellular is **up**, the socket is bound to the cellular interface, so a success
@@ -197,9 +206,9 @@ Run through this once per new modem model / OS image:
    and the payload reports `status=connected`.
 7. Unscrew the antenna / `sudo mmcli -m 0 --disable` with ethernet connected → heartbeats
    keep arriving (now via ethernet) with `status=degraded` and a sensible `status_message`.
-8. `sudo mmcli -m 0 --command='AT+CGDCONT?'`… or check Events: PDP contexts equal the
-   profile exactly (extras deleted on connect).
-9. 2-minute fallback test round-trips; Events show before/after ICCID.
+8. `sudo mmcli -m 0 --command='AT+CGDCONT?'`… or check the Timeline: PDP contexts equal
+   the profile exactly (extras deleted on connect).
+9. 2-minute fallback test round-trips; Timeline shows before/after ICCID.
 10. Hot-swap SIMs while running → new profile applied automatically.
 11. `sudo mmcli -m 0 --disable` → supervisor recovers without a service restart.
 12. `sudo kill -STOP $(pidof -x python | head -1)` (or the sim-monitor PID) → systemd
