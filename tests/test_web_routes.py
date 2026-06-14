@@ -62,6 +62,11 @@ class TestSpaServing:
         assert page.status_code == 200
         assert b'id="app"' in page.data  # the SPA mount point
 
+    def test_favicon_served(self, sim, client):
+        resp = client.get("/favicon.svg")
+        assert resp.status_code == 200
+        assert b"<svg" in resp.data
+
 
 class TestStatusJson:
     def test_status(self, sim, client):

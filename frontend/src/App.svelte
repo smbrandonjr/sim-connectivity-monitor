@@ -73,6 +73,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>{$status?.sim_name ? `${$status.sim_name} · sim-monitor` : "sim-monitor"}</title>
+</svelte:head>
+
 <div class="app-bg"></div>
 <Toasts />
 <ConfirmModal />

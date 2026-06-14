@@ -31,7 +31,7 @@ sim-monitor = "sim_monitor.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-sim_monitor = ["web/spa/index.html", "web/spa/assets/*"]
+sim_monitor = ["web/spa/*", "web/spa/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

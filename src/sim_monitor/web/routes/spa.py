@@ -27,3 +27,8 @@ def index():
 @bp.get("/assets/<path:filename>")
 def assets(filename: str):
     return send_from_directory(SPA_DIR / "assets", filename)
+
+
+@bp.get("/favicon.svg")
+def favicon():
+    return send_from_directory(SPA_DIR, "favicon.svg")

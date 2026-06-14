@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="13" fill="#00040f"/>
+  <g fill="none" stroke="#bffd11" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- mast legs -->
+    <path d="M25 52 L31.2 22"/>
+    <path d="M39 52 L32.8 22"/>
+    <!-- cross braces -->
+    <path d="M27 44 H37"/>
+    <path d="M28.4 36 H35.6"/>
+    <path d="M29.6 29 H34.4"/>
+    <!-- antenna -->
+    <path d="M32 22 V15"/>
+    <!-- broadcast waves -->
+    <path d="M23 11 a13 13 0 0 0 0 16"/>
+    <path d="M41 11 a13 13 0 0 1 0 16"/>
+    <path d="M27 14 a8 8 0 0 0 0 10"/>
+    <path d="M37 14 a8 8 0 0 1 0 10"/>
+  </g>
+  <circle cx="32" cy="13" r="2.6" fill="#bffd11"/>
+</svg>
