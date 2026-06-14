@@ -23,7 +23,7 @@ from sim_monitor.core.states import State
 from sim_monitor.monitor.placeholders import render, render_body_fields
 from sim_monitor.monitor.transport import make_session
 from sim_monitor.storage.db import Database
-from sim_monitor.system.host import collect_host_metrics
+from sim_monitor.system.host import collect_host_metrics, collect_interface_ips
 
 log = logging.getLogger(__name__)
 
@@ -115,6 +115,7 @@ class HttpMonitor:
         )
         context = snapshot.placeholder_context()
         context.update(collect_host_metrics())
+        context.update(collect_interface_ips())
         context["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         # URL + headers are string-templated; the body is either built from
         # structured fields (always-valid JSON) or string-templated for raw use.

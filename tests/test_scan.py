@@ -4,6 +4,27 @@ import pytest
 
 from sim_monitor.scan import net
 from sim_monitor.scan.manager import ScanManager
+from sim_monitor.system.host import collect_interface_ips
+
+_IP_ADDR_JSON = """[
+  {"ifname":"lo","addr_info":[{"family":"inet","local":"127.0.0.1"}]},
+  {"ifname":"eth0","addr_info":[{"family":"inet","local":"192.168.1.50"}]},
+  {"ifname":"wlan0","addr_info":[{"family":"inet6","local":"fe80::1"},
+                                  {"family":"inet","local":"192.168.1.51"}]},
+  {"ifname":"wwan0","addr_info":[{"family":"inet","local":"10.170.42.7"}]}
+]"""
+
+
+class TestInterfaceIps:
+    def test_maps_present_interfaces(self):
+        ips = collect_interface_ips(runner=lambda *a, **k: _IP_ADDR_JSON)
+        assert ips == {"eth0_ip": "192.168.1.50", "wlan0_ip": "192.168.1.51",
+                       "wwan0_ip": "10.170.42.7"}  # lo skipped; ipv4 only
+
+    def test_empty_when_ip_unavailable(self):
+        def boom(*a, **k):
+            raise OSError("no ip command")
+        assert collect_interface_ips(runner=boom) == {}
 
 
 class TestParsePorts:

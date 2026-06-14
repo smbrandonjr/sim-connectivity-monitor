@@ -184,10 +184,11 @@ def command(name: str):
 def placeholders():
     """Current values of every heartbeat placeholder, for the payload builder's
     live preview (host metrics + sampled_at included)."""
-    from sim_monitor.system.host import collect_host_metrics
+    from sim_monitor.system.host import collect_host_metrics, collect_interface_ips
 
     ctx = sim().store.get().placeholder_context()
     ctx.update(collect_host_metrics())
+    ctx.update(collect_interface_ips())
     ctx["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     return jsonify(ctx)
 

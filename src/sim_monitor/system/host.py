@@ -3,7 +3,30 @@ empty dict on other platforms so the fields are simply omitted)."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+from sim_monitor.system import proc
+
+
+def collect_interface_ips(runner=proc.run) -> dict:
+    """IPv4 address of each non-loopback interface, keyed '<name>_ip' (e.g.
+    eth0_ip, wlan0_ip, wwan0_ip). Only present interfaces appear, so heartbeat
+    fields are simply omitted when an interface isn't up."""
+    try:
+        data = json.loads(runner(["ip", "-j", "addr", "show"], timeout=5) or "[]")
+    except Exception:  # noqa: BLE001 - best-effort; no `ip` -> nothing to report
+        return {}
+    out: dict = {}
+    for link in data:
+        name = link.get("ifname")
+        if not name or name == "lo":
+            continue
+        for addr in link.get("addr_info", []):
+            if addr.get("family") == "inet" and addr.get("local"):
+                out[f"{name}_ip"] = addr["local"]
+                break
+    return out
 
 
 def collect_host_metrics() -> dict:
