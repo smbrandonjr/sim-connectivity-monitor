@@ -80,12 +80,28 @@ def monitor_results():
 @bp.get("/timeline.json")
 def timeline():
     app = sim()
-    data = build_timeline(
-        events=app.db.recent_events(limit=300),
-        urcs=app.db.recent_urcs(limit=300),
-        identity=app.db.recent_identity(limit=100),
+    source = request.args.get("source") or None
+    kind = request.args.get("kind") or None
+    limit = max(1, min(request.args.get("limit", 50, type=int), 200))
+    offset = max(0, request.args.get("offset", 0, type=int))
+    merged = build_timeline(
+        events=app.db.recent_events(limit=2000),
+        urcs=app.db.recent_urcs(limit=2000),
+        identity=app.db.recent_identity(limit=200),
+        limit=1_000_000,
     )
-    return jsonify(data)
+    kinds = sorted({r["kind"] for r in merged})  # for the filter dropdown
+    if source:
+        merged = [r for r in merged if r["source"] == source]
+    if kind:
+        merged = [r for r in merged if r["kind"] == kind]
+    return jsonify({
+        "rows": merged[offset:offset + limit],
+        "total": len(merged),
+        "kinds": kinds,
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 def _bundle(app) -> dict:

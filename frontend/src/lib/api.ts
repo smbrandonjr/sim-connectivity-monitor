@@ -9,7 +9,16 @@ async function getJSON<T>(path: string): Promise<T> {
 
 export const api = {
   status: () => getJSON<any>("/api/status.json"),
-  timeline: () => getJSON<any[]>("/api/timeline.json"),
+  timeline: (params: { source?: string; kind?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.source) q.set("source", params.source);
+    if (params.kind) q.set("kind", params.kind);
+    q.set("limit", String(params.limit ?? 50));
+    q.set("offset", String(params.offset ?? 0));
+    return getJSON<{ rows: any[]; total: number; kinds: string[]; limit: number; offset: number }>(
+      `/api/timeline.json?${q.toString()}`,
+    );
+  },
   urcs: () => getJSON<any[]>("/api/urcs.json"),
   identity: () => getJSON<any[]>("/api/identity.json"),
   events: () => getJSON<any[]>("/api/events.json"),

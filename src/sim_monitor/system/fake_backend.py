@@ -21,6 +21,8 @@ class FakeBackend(NetworkBackend):
         self.interface = "wwan0"
         self.ip_address = "10.170.42.7"
         self.routing_ok = True
+        self.routing_unfixable = False  # model a PPP link whose metric won't stick
+        self.assert_routing_calls = 0
         # Scripting hooks
         self.fail_connect = False
         self.fail_configure = False
@@ -83,7 +85,9 @@ class FakeBackend(NetworkBackend):
         return self.routing_ok
 
     def assert_routing(self, profile: Profile) -> None:
-        self.routing_ok = True
+        self.assert_routing_calls += 1
+        if not self.routing_unfixable:  # PPP-like links never accept the metric
+            self.routing_ok = True
 
     def modem_disable_enable(self) -> None:
         self.disable_enable_calls += 1

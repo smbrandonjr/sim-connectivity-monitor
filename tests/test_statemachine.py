@@ -124,6 +124,19 @@ class TestHappyPath:
         assert snap.signal_rssi == -77
         assert snap.routing_ok is True
 
+    def test_unfixable_routing_drift_logged_once_not_spammed(self, harness):
+        # A PPP-like link whose metric won't stick should NOT spam the log.
+        harness.run_until(State.CONNECTED)
+        harness.backend.routing_ok = False
+        harness.backend.routing_unfixable = True
+        for _ in range(20):
+            harness.tick(advance=5)  # 100s of connected ticks
+        warnings = [e for e in harness.db.recent_events(500)
+                    if e["kind"] == "routing" and "not the lowest-metric" in e["message"]]
+        assert len(warnings) == 1  # one event per drift episode, not per tick
+        # Re-assertion is throttled (~every 30s), not attempted every 5s tick.
+        assert harness.backend.assert_routing_calls <= 5
+
     def test_gateway_surfaced(self, harness):
         harness.run_until(State.CONNECTED)
         harness.tick()

@@ -83,8 +83,21 @@ class TestStatusJson:
 class TestTimelineAndBundle:
     def test_timeline_json(self, sim, client):
         tick_until_connected(sim)
-        rows = client.get("/api/timeline.json").get_json()
-        assert any(r["source"] == "event" for r in rows)
+        data = client.get("/api/timeline.json").get_json()
+        assert any(r["source"] == "event" for r in data["rows"])
+        assert "total" in data and "kinds" in data
+
+    def test_timeline_pagination_and_filter(self, sim, client):
+        tick_until_connected(sim)
+        for i in range(60):
+            sim.db.add_event("info", "test", f"row {i}")
+        page = client.get("/api/timeline.json?limit=20&offset=0").get_json()
+        assert len(page["rows"]) == 20 and page["total"] >= 60
+        page2 = client.get("/api/timeline.json?limit=20&offset=20").get_json()
+        assert page2["rows"][0]["ts"] <= page["rows"][-1]["ts"]  # older
+        filtered = client.get("/api/timeline.json?source=event&kind=test").get_json()
+        assert all(r["kind"] == "test" for r in filtered["rows"])
+        assert filtered["total"] == 60
 
     def test_bundle_downloads_with_filename(self, sim, client):
         tick_until_connected(sim)

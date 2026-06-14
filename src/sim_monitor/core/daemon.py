@@ -91,6 +91,8 @@ class Daemon:
         self._variant_index = 0             # which PDP-context variant we're trying
         self._fallback_active = False       # on the built-in last-ditch default
         self._next_telemetry = 0.0          # monotonic time of next telemetry poll
+        self._next_routing_assert = 0.0     # throttle routing re-assertion
+        self._routing_warned = False        # logged the current drift episode?
         self._next_sms_poll = 0.0           # monotonic time of next SMS backstop poll
         self._next_sim_reprobe = 0.0        # when to next nudge a SIM re-read
         self.global_monitor: MonitorConfig | None = None
@@ -651,12 +653,25 @@ class Daemon:
 
         routing_ok = self.backend.verify_routing(self.active_profile)
         if not routing_ok:
-            self.events.warning("routing", "default route drifted; re-asserting metric")
-            try:
-                self.backend.assert_routing(self.active_profile)
-                routing_ok = self.backend.verify_routing(self.active_profile)
-            except BackendError as e:
-                self.events.error("routing", f"failed to re-assert routing: {e}")
+            # Re-assert at most every 30s (not every tick) and log once per
+            # episode — otherwise a PPP link, whose metric we can't always pin,
+            # spams the event log.
+            if self.clock() >= self._next_routing_assert:
+                self._next_routing_assert = self.clock() + 30
+                try:
+                    self.backend.assert_routing(self.active_profile)
+                    routing_ok = self.backend.verify_routing(self.active_profile)
+                except BackendError as e:
+                    self.events.error("routing", f"failed to re-assert routing: {e}")
+                if not routing_ok and not self._routing_warned:
+                    self._routing_warned = True
+                    self.events.warning(
+                        "routing",
+                        "cellular is not the lowest-metric default route; re-asserting "
+                        "(can be normal briefly, or on a PPP link)",
+                    )
+        if routing_ok:
+            self._routing_warned = False
 
         operator = signal = None
         try:
