@@ -219,7 +219,8 @@ Run through this once per new modem model / OS image:
 
 ## Development
 
-Everything except real hardware runs anywhere (including Windows) via simulate mode:
+Everything except real hardware runs anywhere (including Windows) via simulate mode.
+Requires **Python 3.11+**:
 
 ```sh
 python -m pip install -e .[dev]
