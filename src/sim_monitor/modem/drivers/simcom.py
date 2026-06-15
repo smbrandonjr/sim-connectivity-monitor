@@ -8,7 +8,8 @@ from sim_monitor.modem.at_driver import ATModemDriver
 class SimcomDriver(ATModemDriver):
     name = "simcom"
     VENDOR_IDS = frozenset({0x1E0E})
-    ICCID_COMMAND = "AT+CICCID"  # answers +ICCID: <number>
+    ICCID_COMMAND = "AT+CICCID"  # SIM7500/7600 answer +ICCID: <number>
+    ICCID_FALLBACK_COMMANDS = ("AT+CCID",)  # SIM7000/707x (LPWA) use AT+CCID
     RESET_COMMAND = "AT+CRESET"
     DIAGNOSTIC_COMMANDS = [
         *ATModemDriver.DIAGNOSTIC_COMMANDS,

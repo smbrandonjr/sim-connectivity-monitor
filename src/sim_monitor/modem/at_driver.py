@@ -34,6 +34,9 @@ class ATModemDriver(ModemDriver):
     name = "generic-3gpp"
     VENDOR_IDS: frozenset[int] = frozenset()
     ICCID_COMMAND = "AT+CCID"
+    # Tried in order after ICCID_COMMAND if it errors — modem families within a
+    # vendor differ (e.g. SIM7600 uses AT+CICCID, SIM707x uses AT+CCID).
+    ICCID_FALLBACK_COMMANDS: tuple[str, ...] = ()
     RESET_COMMAND = "AT+CFUN=1,1"
 
     # rat-identifier -> AT command(s) that force it. 3GPP TS 27.007 AT+WS46
@@ -86,9 +89,20 @@ class ATModemDriver(ModemDriver):
             raise
         if cpin != "READY":
             return SimStatus(present=False, detail=f"SIM locked ({cpin}); PINs are unsupported")
-        iccid = self._parse(at_parser.parse_iccid, self.at.execute(self.ICCID_COMMAND))
+        iccid = self._read_iccid()
         imsi = self._parse(at_parser.parse_imsi, self.at.execute("AT+CIMI"))
         return SimStatus(present=True, iccid=iccid, imsi=imsi)
+
+    def _read_iccid(self) -> str:
+        """Read the ICCID, trying the driver's primary command then any fallbacks
+        so one driver covers a vendor's differing modem families."""
+        last_error: ModemError | None = None
+        for command in (self.ICCID_COMMAND, *self.ICCID_FALLBACK_COMMANDS):
+            try:
+                return self._parse(at_parser.parse_iccid, self.at.execute(command))
+            except ModemError as e:  # ATCommandError (modem ERROR) or parse failure
+                last_error = e
+        raise last_error or ModemError("no ICCID command supported by this modem")
 
     def get_operator(self) -> str | None:
         return self._parse(at_parser.parse_cops, self.at.execute("AT+COPS?"))

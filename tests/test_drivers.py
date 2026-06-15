@@ -77,6 +77,27 @@ class TestIdentityAndSim:
         assert sim.present is False
         assert "no SIM" in sim.detail
 
+    def test_simcom_iccid_falls_back_to_ccid(self):
+        # SIM707x rejects AT+CICCID (unmapped -> ATCommandError) but answers AT+CCID.
+        channel = ScriptedChannel({
+            "AT+CPIN?": ["+CPIN: READY"],
+            "AT+CCID": ["+CCID: 8944500612345678901"],
+            "AT+CIMI": ["234500000000001"],
+        })
+        sim = SimcomDriver(channel).get_sim_status()
+        assert sim.present and sim.iccid == "8944500612345678901"
+        assert channel.executed.index("AT+CICCID") < channel.executed.index("AT+CCID")
+
+    def test_simcom_iccid_prefers_ciccid_when_supported(self):
+        channel = ScriptedChannel({
+            "AT+CPIN?": ["+CPIN: READY"],
+            "AT+CICCID": ["+ICCID: 8944500612345678901"],
+            "AT+CIMI": ["234500000000001"],
+        })
+        sim = SimcomDriver(channel).get_sim_status()
+        assert sim.iccid == "8944500612345678901"
+        assert "AT+CCID" not in channel.executed  # primary worked, no fallback needed
+
 
 class TestRat:
     def _chan(self, *ok_commands):
