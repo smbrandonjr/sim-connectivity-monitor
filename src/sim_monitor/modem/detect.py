@@ -51,6 +51,18 @@ class SerialPortInfo:
     location: str | None  # e.g. "1-1.2:1.3" -> interface 3
 
 
+@dataclass(frozen=True)
+class ScannedPort:
+    """One serial port enriched for the UI's modem-setup view."""
+
+    device: str
+    vid: int | None
+    pid: int | None
+    interface: int | None
+    mm_claimed: bool   # ModemManager listed this port (avoid taking it)
+    is_current: bool   # the port sim-monitor is using right now
+
+
 def interface_number(location: str | None) -> int | None:
     if not location or "." not in location:
         return None
@@ -129,6 +141,66 @@ class RealDetector(ModemDetector):
         self.last_at_port = port_device
         log.info("using AT port %s with %s driver", port_device, driver_cls.name)
         return driver_cls(channel)
+
+    def scan_ports(self, current_at_port: str | None) -> tuple[bool, list[ScannedPort]]:
+        """Enumerate serial ports for the UI's modem-setup view, flagging which
+        ones ModemManager claimed (don't take those) and which one we use now.
+        Read-only; safe to call from the daemon thread anytime."""
+        try:
+            modem_index = self.mmcli.first_modem()
+        except Exception:  # noqa: BLE001 - mmcli hiccup must not break the scan
+            modem_index = None
+        claimed: set[str] = set()
+        if modem_index is not None:
+            try:
+                claimed = {Path(p).name for p in self.mmcli.modem_ports(modem_index)}
+            except Exception:  # noqa: BLE001
+                claimed = set()
+        current_real = str(Path(current_at_port).resolve()) if current_at_port else None
+        scanned = []
+        for p in self.port_lister():
+            is_current = current_at_port is not None and (
+                p.device == current_at_port or str(Path(p.device).resolve()) == current_real
+            )
+            scanned.append(
+                ScannedPort(
+                    device=p.device, vid=p.vid, pid=p.pid,
+                    interface=interface_number(p.location),
+                    mm_claimed=Path(p.device).name in claimed,
+                    is_current=is_current,
+                )
+            )
+        scanned.sort(key=lambda s: (s.interface if s.interface is not None else 99, s.device))
+        return modem_index is not None, scanned
+
+    def probe(self, device: str) -> tuple[bool, str | None, str | None]:
+        """Open `device` and ask the modem who it is. Returns
+        (responded, identity, detail). Never raises — a dead/busy port just
+        reports responded=False with a reason."""
+        try:
+            channel = self.channel_factory(device, self.baud)
+        except Exception as e:  # noqa: BLE001
+            return False, None, str(e)
+        try:
+            channel.open()
+            channel.execute("ATE0")
+            parts = []
+            for cmd in ("AT+CGMI", "AT+CGMM"):
+                try:
+                    lines = [ln for ln in channel.execute(cmd) if ln.strip()]
+                    if lines:
+                        parts.append(lines[0].strip())
+                except (ModemError, at_parser.ATParseError):
+                    pass
+            identity = " ".join(dict.fromkeys(parts)) or "responded (unknown model)"
+            return True, identity, None
+        except ModemError as e:
+            return False, None, str(e)
+        finally:
+            try:
+                channel.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _resolve_at_port(self) -> tuple[str, int | None]:
         ports = self.port_lister()

@@ -101,6 +101,21 @@ class ReloadProfiles:
     pass
 
 
+@dataclass(frozen=True)
+class ScanSerialPorts:
+    pass
+
+
+@dataclass(frozen=True)
+class ProbeAtPort:
+    device: str
+
+
+@dataclass(frozen=True)
+class SetAtPort:
+    device: str  # "" or "auto" -> automatic detection
+
+
 Command = (
     Reconnect
     | ResetModem
@@ -120,6 +135,9 @@ Command = (
     | SetSimName
     | ReloadMonitorConfig
     | ReloadProfiles
+    | ScanSerialPorts
+    | ProbeAtPort
+    | SetAtPort
 )
 
 

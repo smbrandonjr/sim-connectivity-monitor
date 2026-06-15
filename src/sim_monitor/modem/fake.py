@@ -216,9 +216,31 @@ class FakeDetector(ModemDetector):
         self.driver = driver
         self.appear_after = appear_after
         self.calls = 0
+        self.at_port = "auto"
+        self.last_at_port = "/dev/ttyUSB-fake"
 
     def detect(self) -> ModemDriver | None:
         self.calls += 1
         if self.driver is None or self.calls <= self.appear_after:
             return None
         return self.driver
+
+    def scan_ports(self, current_at_port):
+        """Simulated SIM7080-style 6-port layout for --simulate and tests."""
+        from sim_monitor.modem.detect import ScannedPort
+
+        present = self.driver is not None
+        ports = [
+            ScannedPort("/dev/ttyUSB0", 0x1E0E, 0x9206, 0, mm_claimed=True, is_current=False),
+            ScannedPort("/dev/ttyUSB1", 0x1E0E, 0x9206, 1, mm_claimed=False, is_current=False),
+            ScannedPort("/dev/ttyUSB2", 0x1E0E, 0x9206, 2, mm_claimed=False,
+                        is_current=current_at_port == "/dev/ttyUSB2"),
+            ScannedPort("/dev/ttyUSB3", 0x1E0E, 0x9206, 3, mm_claimed=False,
+                        is_current=current_at_port == "/dev/ttyUSB3"),
+        ]
+        return present, ports
+
+    def probe(self, device: str):
+        if device in ("/dev/ttyUSB2", "/dev/ttyUSB3"):
+            return True, "SIMCOM SIM7080", None
+        return False, None, "no response from port"

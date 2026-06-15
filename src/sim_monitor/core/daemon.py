@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import replace
 
 from sim_monitor.config.loader import load_profiles
 from sim_monitor.config.matcher import match_profile
@@ -22,6 +23,8 @@ from sim_monitor.core.state_store import (
     DiagnosticEntry,
     DiagnosticsReport,
     FallbackStatus,
+    ModemSetup,
+    SerialPort,
     StateStore,
 )
 from sim_monitor.core.states import State
@@ -104,10 +107,23 @@ class Daemon:
         self._next_sms_poll = 0.0           # monotonic time of next SMS backstop poll
         self._next_sim_reprobe = 0.0        # when to next nudge a SIM re-read
         self._ppp_reset_attempts = 0        # bounded modem resets to escape a PPP link
+        self._next_port_scan = 0.0          # throttle serial-port scans while NO_MODEM
         self.global_monitor: MonitorConfig | None = None
         self._load_global_monitor()
 
-        store.update(profile_count=len(profiles))
+        # Apply a UI-set AT-port override (survives restarts; overrides config.yaml).
+        override = None
+        try:
+            override = self.db.get_setting("modem_at_port")
+        except Exception:  # noqa: BLE001 - a bad stored value must not crash boot
+            pass
+        if override and hasattr(self.detector, "at_port"):
+            self.detector.at_port = override
+
+        store.update(
+            profile_count=len(profiles),
+            modem_setup=ModemSetup(at_port=getattr(self.detector, "at_port", "auto")),
+        )
 
     def _load_global_monitor(self) -> None:
         """Load the global heartbeat config from the device DB (UI-managed)."""
@@ -238,6 +254,12 @@ class Daemon:
                 self.events.info("monitor", "global heartbeat config updated")
             case cmd.ReloadProfiles():
                 self._reload_profiles()
+            case cmd.ScanSerialPorts():
+                self._scan_serial_ports()
+            case cmd.ProbeAtPort(device=device):
+                self._probe_at_port(device)
+            case cmd.SetAtPort(device=device):
+                self._set_at_port(device)
 
     def _reevaluate_profile(self) -> None:
         """Re-run profile selection after a force/release/reload."""
@@ -263,6 +285,11 @@ class Daemon:
     # ------------------------------------------------------- state handlers
 
     def _state_no_modem(self) -> None:
+        # Keep the modem-setup view fresh while we're stuck, so the UI can guide
+        # the user to the right AT port without any manual refresh.
+        if self.clock() >= self._next_port_scan:
+            self._next_port_scan = self.clock() + 10
+            self._scan_serial_ports()
         try:
             driver = self.detector.detect()
         except ModemError as e:
@@ -901,6 +928,87 @@ class Daemon:
             self.backend.disconnect()
         except BackendError as e:
             self.events.warning("connection", f"disconnect failed: {e}")
+
+    # ----------------------------------------------------- modem / AT-port setup
+
+    def _current_at_port(self) -> str | None:
+        """The serial device sim-monitor is using (resolved 'auto' if connected)."""
+        resolved = getattr(self.detector, "last_at_port", None)
+        if resolved:
+            return resolved
+        configured = getattr(self.detector, "at_port", "auto")
+        return configured if configured and configured != "auto" else None
+
+    def _scan_serial_ports(self) -> None:
+        """Enumerate serial ports for the UI's modem-setup view (read-only)."""
+        if not hasattr(self.detector, "scan_ports"):
+            return
+        try:
+            present, scanned = self.detector.scan_ports(self._current_at_port())
+        except Exception as e:  # noqa: BLE001 - never let a scan break the tick
+            self.events.warning("modem", f"serial-port scan failed: {e}")
+            return
+        prior = {p.device: p for p in self.store.get().modem_setup.ports}
+        ports = []
+        for sp in scanned:
+            old = prior.get(sp.device)
+            ports.append(SerialPort(
+                device=sp.device, vid=sp.vid, pid=sp.pid, interface=sp.interface,
+                mm_claimed=sp.mm_claimed, is_current=sp.is_current,
+                tested=old.tested if old else False,
+                responded=old.responded if old else False,
+                identity=old.identity if old else None,
+                detail=old.detail if old else None,
+            ))
+        self.store.update(modem_setup=ModemSetup(
+            at_port=getattr(self.detector, "at_port", "auto"),
+            modem_present=present, scanned_at=time.time(), ports=tuple(ports),
+        ))
+
+    def _probe_at_port(self, device: str) -> None:
+        """Open one serial port and ask the modem to identify itself, so the user
+        can tell which port is the AT port. Runs on the daemon thread (sole serial
+        owner). If we already hold this port, report the live identity instead of
+        fighting over the handle."""
+        if not hasattr(self.detector, "probe"):
+            return
+        current = self._current_at_port()
+        if self.driver is not None and current and device == current:
+            snap = self.store.get()
+            responded = True
+            identity = (f"{snap.vendor or ''} {snap.model or ''}".strip()
+                        or "in use (responding)")
+            detail = None
+        else:
+            responded, identity, detail = self.detector.probe(device)
+        setup = self.store.get().modem_setup
+        ports = tuple(
+            replace(p, tested=True, responded=responded, identity=identity, detail=detail)
+            if p.device == device else p
+            for p in setup.ports
+        )
+        self.store.update(modem_setup=replace(setup, ports=ports))
+        self.events.info(
+            "modem",
+            f"AT probe {device}: {'ok — ' + (identity or '') if responded else 'no response'}",
+        )
+
+    def _set_at_port(self, device: str) -> None:
+        """Persist the chosen AT port (or 'auto') and re-detect with it."""
+        auto = device.strip() in ("", "auto")
+        value = "auto" if auto else device.strip()
+        if hasattr(self.detector, "at_port"):
+            self.detector.at_port = value
+        try:
+            self.db.set_setting("modem_at_port", None if auto else value)
+        except Exception as e:  # noqa: BLE001
+            self.events.warning("modem", f"could not persist AT port: {e}")
+        self.events.info(
+            "modem", "AT port set to auto-detect" if auto else f"AT port set to {value}"
+        )
+        self._safe_disconnect()
+        self._drop_modem()       # re-detect with the new port on the next tick
+        self._next_port_scan = 0  # rescan promptly so the UI shows the new 'current'
 
     def _full_reset_modem(self) -> None:
         """Reset the modem and re-detect from scratch: the USB device

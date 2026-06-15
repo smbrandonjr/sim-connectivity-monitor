@@ -200,6 +200,12 @@ def command(name: str):
                 command_obj = cmd.MarkSmsRead()
             case "set-sim-name":
                 command_obj = cmd.SetSimName(name=str(body.get("name", "")))
+            case "scan-serial-ports":
+                command_obj = cmd.ScanSerialPorts()
+            case "probe-at-port":
+                command_obj = cmd.ProbeAtPort(device=str(body["device"]))
+            case "set-at-port":
+                command_obj = cmd.SetAtPort(device=str(body.get("device", "")))
             case _:
                 return jsonify({"error": f"unknown command {name!r}"}), 404
     except (KeyError, ValueError, TypeError) as e:

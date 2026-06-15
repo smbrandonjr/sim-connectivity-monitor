@@ -103,7 +103,8 @@ Browse to `http://<pi-address>:8080` from your LAN.
 - **Scan** — network tools (host discovery, port scan, reachability checks,
   traceroute), optionally bound to a specific interface.
 - **Timeline** — everything the daemon did (events, URCs, identity changes).
-- **Diagnostics** — AT command reference and ad-hoc AT command execution.
+- **Diagnostics** — guided modem / AT-port setup (test & pick the right serial port for a
+  new modem model), AT command reference, and ad-hoc AT command execution.
 
 > The UI has no authentication — keep it LAN-only. Don't port-forward it.
 
@@ -195,7 +196,7 @@ reboots the Pi), systemd's watchdog restarts the process if it ever hangs, and
 | Symptom | Fix |
 |---|---|
 | `mmcli -L` shows no modem | Check `lsusb` for the modem; check power (modems are power-hungry — use a good PSU); try another cable/port. |
-| Dashboard stuck in `NO_MODEM`, events say "no AT port was found" | Your modem model isn't in the udev rules / hints. Find the spare AT interface: `udevadm info -q property -n /dev/ttyUSB3 \| grep ID_USB_INTERFACE_NUM`, check `mmcli -m 0` "Ports" doesn't list it, then either add a rule to `/etc/udev/rules.d/77-sim-monitor.rules` (pattern inside) or set `modem.at_port: /dev/ttyUSB3` in `/etc/sim-monitor/config.yaml`. |
+| Dashboard stuck in `NO_MODEM`, events say "no AT port was found" | Your modem model isn't in the auto-detect hints. **Easiest:** the Dashboard shows a **Modem & AT port** panel (also under **Diagnostics**) — click **Test** on each port and **Use** the one that replies with the modem's name and isn't marked "MM uses". The choice is saved on the device. (Manual equivalents still work: set `modem.at_port` in `/etc/sim-monitor/config.yaml`, or add a udev rule to `/etc/udev/rules.d/77-sim-monitor.rules`.) |
 | MM claimed the port we want | Confirm the udev rule's `ID_USB_INTERFACE_NUM` matches and replug the modem; `mmcli -m 0` should no longer list that ttyUSB under Ports. |
 | `SIM locked (SIM PIN)` in last error | Remove the PIN with another device/modem tool; PIN-locked SIMs are unsupported. |
 | Connects but ethernet still wins the default route | Dashboard "Default route OK" will be *no* and the daemon re-asserts metrics; check `nmcli -f ipv4.route-metric connection show sim-monitor-cellular`. |

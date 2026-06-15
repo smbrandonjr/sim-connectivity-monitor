@@ -608,6 +608,63 @@ def test_is_ppp_interface():
     assert not is_ppp_interface("")
 
 
+class TestModemSetup:
+    def test_ports_scanned_into_snapshot(self, harness):
+        harness.tick()  # NO_MODEM tick auto-scans serial ports
+        setup = harness.store.get().modem_setup
+        assert setup.modem_present is True
+        assert [p.device for p in setup.ports] == [
+            "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyUSB2", "/dev/ttyUSB3",
+        ]
+        assert setup.ports[0].mm_claimed is True  # ttyUSB0 is MM's in the fake
+
+    def test_probe_marks_the_port(self, harness):
+        harness.tick()  # populate ports
+        harness.queue.put(cmd.ProbeAtPort("/dev/ttyUSB2"))
+        harness.tick()
+        port = next(p for p in harness.store.get().modem_setup.ports
+                    if p.device == "/dev/ttyUSB2")
+        assert port.tested and port.responded
+        assert "SIM7080" in port.identity
+
+    def test_probe_dead_port_reports_no_response(self, harness):
+        harness.tick()
+        harness.queue.put(cmd.ProbeAtPort("/dev/ttyUSB1"))
+        harness.tick()
+        port = next(p for p in harness.store.get().modem_setup.ports
+                    if p.device == "/dev/ttyUSB1")
+        assert port.tested and not port.responded
+
+    def test_set_at_port_persists_and_applies(self, harness):
+        harness.tick()
+        harness.queue.put(cmd.SetAtPort("/dev/ttyUSB2"))
+        harness.tick()
+        assert harness.daemon.detector.at_port == "/dev/ttyUSB2"
+        assert harness.db.get_setting("modem_at_port") == "/dev/ttyUSB2"
+        assert harness.store.get().modem_setup.at_port == "/dev/ttyUSB2"
+
+    def test_set_at_port_auto_clears_override(self, harness):
+        harness.tick()
+        harness.queue.put(cmd.SetAtPort("/dev/ttyUSB2"))
+        harness.tick()
+        harness.queue.put(cmd.SetAtPort(""))  # back to auto
+        harness.tick()
+        assert harness.daemon.detector.at_port == "auto"
+        assert harness.db.get_setting("modem_at_port") is None
+
+    def test_persisted_override_applied_on_startup(self, tmp_path):
+        h = Harness(tmp_path)
+        h.db.set_setting("modem_at_port", "/dev/ttyUSB3")
+        # A fresh daemon over the same DB should pick up the override.
+        from sim_monitor.core.daemon import Daemon
+        d = Daemon(
+            config=h.daemon.config, profiles=[DEFAULT_PROFILE], detector=h.detector,
+            backend=h.backend, store=h.store, command_queue=h.queue, events=h.events,
+            db=h.db, clock=lambda: h.t,
+        )
+        assert d.detector.at_port == "/dev/ttyUSB3"
+
+
 class TestFallbackTest:
     def test_full_fallback_cycle_with_profile_switch(self, tmp_path):
         h = Harness(tmp_path, profiles=[DEFAULT_PROFILE, FALLBACK_PROFILE])

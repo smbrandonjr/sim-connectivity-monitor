@@ -3,6 +3,7 @@
   import { api } from "../lib/api";
   import { toast } from "../lib/toast";
   import { ts } from "../lib/format";
+  import ModemSetup from "../lib/ModemSetup.svelte";
 
   let commands = "";
   let fallbackSeconds = 900;
@@ -60,6 +61,8 @@
 </script>
 
 <h1>Diagnostics</h1>
+
+<ModemSetup />
 
 <section class="ui-card">
   <h2>Actions</h2>

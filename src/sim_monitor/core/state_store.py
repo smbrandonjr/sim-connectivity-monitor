@@ -71,6 +71,32 @@ class FallbackStatus:
 
 
 @dataclass(frozen=True)
+class SerialPort:
+    """A serial port as shown in the UI's modem-setup view."""
+
+    device: str
+    vid: int | None = None
+    pid: int | None = None
+    interface: int | None = None
+    mm_claimed: bool = False     # ModemManager listed this port
+    is_current: bool = False     # sim-monitor is using this port now
+    tested: bool = False         # an AT probe has been run against it
+    responded: bool = False      # it answered the AT probe
+    identity: str | None = None  # e.g. "SIMCOM SIM7080" (from the probe)
+    detail: str | None = None    # probe error / note
+
+
+@dataclass(frozen=True)
+class ModemSetup:
+    """State for the guided modem / AT-port setup UI."""
+
+    at_port: str = "auto"            # the configured value ("auto" or a device path)
+    modem_present: bool = False      # ModemManager sees a modem
+    scanned_at: float | None = None  # epoch of the last port scan
+    ports: tuple[SerialPort, ...] = ()
+
+
+@dataclass(frozen=True)
 class Snapshot:
     state: State = State.NO_MODEM
     state_since: float = field(default_factory=time.time)
@@ -98,6 +124,7 @@ class Snapshot:
     last_error: str | None = None
     fallback: FallbackStatus = field(default_factory=FallbackStatus)
     diagnostics: DiagnosticsReport | None = None
+    modem_setup: ModemSetup = field(default_factory=ModemSetup)
     monitor_paused: bool = False  # runtime-only; resets on service restart
     sms_unread: int = 0
     telemetry: dict = field(default_factory=dict)  # latest deep link metrics

@@ -1,0 +1,12 @@
+Could not find platform independent libraries <prefix>
+2026-06-15 12:10:19,748 INFO sim_monitor: sim-monitor 0.1.0 starting (simulate=True)
+2026-06-15 12:10:19,754 INFO sim_monitor: loaded 2 profile(s): hologram-default, formtest
+2026-06-15 12:10:20,055 INFO sim_monitor.web.server: web UI listening on http://0.0.0.0:8080
+2026-06-15 12:10:20,058 INFO waitress: Serving on http://0.0.0.0:8080
+2026-06-15 12:10:25,030 INFO sim_monitor.events: [modem] AT port set to /dev/ttyUSB2
+2026-06-15 12:10:30,044 INFO sim_monitor.events: [modem] modem detected (fake)
+2026-06-15 12:10:30,052 INFO sim_monitor.events: [state] NO_MODEM -> MODEM_FOUND
+2026-06-15 12:10:35,066 INFO sim_monitor.events: [modem] AT port set to auto-detect
+2026-06-15 12:10:35,071 INFO sim_monitor.events: [state] MODEM_FOUND -> NO_MODEM
+2026-06-15 12:10:35,076 INFO sim_monitor.events: [modem] modem detected (fake)
+2026-06-15 12:10:35,081 INFO sim_monitor.events: [state] NO_MODEM -> MODEM_FOUND

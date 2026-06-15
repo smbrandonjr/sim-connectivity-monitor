@@ -4,6 +4,7 @@
   import { api } from "../lib/api";
   import Copyable from "../lib/Copyable.svelte";
   import Sparkline from "../lib/Sparkline.svelte";
+  import ModemSetup from "../lib/ModemSetup.svelte";
   import { METRICS, classify, tierColor } from "../lib/signal";
 
   let history: any[] = [];
@@ -32,6 +33,15 @@
     <div class="ui-card alert">
       <strong>Fallback test in progress</strong> — radio off until the SIM applet switches profiles.
     </div>
+  {/if}
+
+  {#if s.state === "NO_MODEM" && s.modem_setup?.modem_present}
+    <div class="ui-card alert">
+      <strong>Modem detected, but no AT port is set.</strong>
+      A spare serial port is needed to control this modem — test the ports below and pick the
+      one that responds.
+    </div>
+    <ModemSetup />
   {/if}
 
   <div class="cards">

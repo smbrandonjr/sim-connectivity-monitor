@@ -43,6 +43,16 @@ class Mmcli:
     def modem_state(self, index: int) -> str:
         return self.get_modem(index).get("generic", {}).get("state", "unknown")
 
+    def modem_ports(self, index: int) -> list[str]:
+        """tty/net device names ModemManager listed for this modem. mmcli renders
+        them as e.g. 'ttyUSB2 (at)' or 'cdc-wdm0 (qmi)'; we return the bare name."""
+        ports = self.get_modem(index).get("generic", {}).get("ports", [])
+        names = []
+        for entry in ports:
+            if isinstance(entry, str) and entry.strip():
+                names.append(entry.split()[0])
+        return names
+
     def enable(self, index: int) -> None:
         self._run(["mmcli", "-m", str(index), "--enable"], timeout=60)
 
