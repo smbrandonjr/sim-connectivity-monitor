@@ -150,6 +150,8 @@
     fields = (r.body_fields ?? []).map((f: any) => ({ ...f }));
     rawBody = r.body ?? "";
     useRawBody = !fields.length && !!rawBody;
+    lastSaved = JSON.stringify(buildConfig());  // baseline so auto-save won't re-save on load
+    ready = true;
   }
 
   async function loadPlaceholders() { phValues = await api.placeholders(); }
@@ -182,9 +184,37 @@
     }
     return cfg;
   }
-  async function save() {
-    if (await api.saveMonitorConfig(buildConfig())) toast("monitoring saved", "ok");
+  // ── auto-save ──────────────────────────────────────────────────────────────
+  // Settings persist automatically (debounced) once the form has loaded; a
+  // header indicator reports state. `lastSaved` guards against saving the
+  // freshly-loaded config back, and against no-op saves when nothing changed.
+  let ready = false;
+  let lastSaved = "";
+  let saveState: "idle" | "saving" | "saved" | "error" = "idle";
+  let saveTimer: ReturnType<typeof setTimeout>;
+
+  function scheduleSave() {
+    if (!ready) return;
+    if (JSON.stringify(buildConfig()) === lastSaved) {
+      clearTimeout(saveTimer);
+      return; // reverted to the saved state; nothing to do
+    }
+    saveState = "saving";
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(doSave, 700);
   }
+  async function doSave() {
+    const cur = JSON.stringify(buildConfig());
+    const ok = await api.saveMonitorConfig(buildConfig());
+    if (ok) { lastSaved = cur; saveState = "saved"; }
+    else { saveState = "error"; }
+  }
+  // Re-run whenever any persisted setting changes (listed so Svelte tracks them).
+  $: scheduleSave(
+    enabled, interval_seconds, send_when_degraded, bind_cellular, method, url,
+    timeout_seconds, expectStatus, headers, useRawBody, rawBody, fields, sched,
+  );
+
   async function sendNow() {
     if (await api.cmd("monitor-now")) { toast("heartbeat sent", "ok"); setTimeout(loadHistory, 1500); }
   }
@@ -206,8 +236,12 @@
       {$status.monitor_active ? "sending now" : "not sending"}
     </span>
   {/if}
+  <span class="save-status {saveState}">
+    {#if saveState === "saving"}● saving…{:else if saveState === "saved"}✓ saved{:else if saveState === "error"}✕ save failed{/if}
+  </span>
   <button class="ui-btn ui-btn-sm" on:click={sendNow}>Send heartbeat now</button>
 </div>
+<p class="muted" style="margin-top:-4px">Changes save automatically.</p>
 <p class="muted">A global heartbeat sent to your endpoint on a schedule. While connected it goes
   out the cellular interface (proving cellular egress); if cellular drops it keeps sending over
   any other route with <code>status=degraded</code>. A profile may override this if it defines
@@ -324,14 +358,15 @@
       </div>
     {/if}
 
-    <h3 style="font-size:var(--fs-sm);margin:12px 0 4px;color:var(--color-text-muted)">Live preview (what would send now)</h3>
-    <div class="code-block">{preview}</div>
+    <details class="preview">
+      <summary>Live preview (what would send now)</summary>
+      <div class="code-block" style="margin-top:6px">{preview}</div>
+    </details>
   {/if}
 
   <div class="row" style="margin-top:10px">
     <label class="muted">timeout <input class="ui-input" style="width:70px;display:inline-block" type="number" bind:value={timeout_seconds} /> s</label>
     <label class="muted">expect status <input class="ui-input" style="width:120px;display:inline-block" bind:value={expectStatus} /></label>
-    <button class="ui-btn ui-btn-primary" on:click={save}>Save</button>
   </div>
 </section>
 
@@ -366,4 +401,18 @@
 <style>
   fieldset.sched { border: 0; padding: 0; margin: 0; min-width: 0; }
   fieldset.sched:disabled { opacity: 0.45; }
+
+  .save-status { font-size: var(--fs-sm, 13px); min-width: 84px; }
+  .save-status.saving { color: var(--color-text-muted); }
+  .save-status.saved { color: var(--status-green); }
+  .save-status.error { color: var(--status-red); }
+
+  details.preview > summary {
+    cursor: pointer; user-select: none; list-style: none;
+    font-size: var(--fs-sm, 13px); color: var(--color-text-muted);
+    margin: 12px 0 0; display: inline-flex; align-items: center; gap: 6px;
+  }
+  details.preview > summary::-webkit-details-marker { display: none; }
+  details.preview > summary::before { content: "▸"; display: inline-block; transition: transform .12s ease; }
+  details.preview[open] > summary::before { transform: rotate(90deg); }
 </style>
