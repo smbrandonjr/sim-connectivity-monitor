@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "../lib/api";
+  import { status } from "../lib/stores";
   import { toast } from "../lib/toast";
   import { ts } from "../lib/format";
 
@@ -9,6 +10,27 @@
   let interval_seconds = 300;
   let send_when_degraded = true;
   let bind_cellular = true;
+
+  // schedule window (limit heartbeats to e.g. Mon-Fri 9-6 Eastern)
+  const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const TIMEZONES = [
+    "America/New_York", "America/Chicago", "America/Denver",
+    "America/Los_Angeles", "America/Phoenix", "America/Anchorage",
+    "Pacific/Honolulu", "UTC",
+  ];
+  let sched = {
+    enabled: false,
+    timezone: "America/New_York",
+    days: [0, 1, 2, 3, 4],
+    start: "09:00",
+    end: "18:00",
+    override: "auto",
+  };
+  function toggleDay(d: number) {
+    sched.days = sched.days.includes(d)
+      ? sched.days.filter((x) => x !== d)
+      : [...sched.days, d].sort((a, b) => a - b);
+  }
   let method = "POST";
   let url = "";
   let timeout_seconds = 15;
@@ -118,6 +140,7 @@
     interval_seconds = c.interval_seconds ?? 300;
     send_when_degraded = c.send_when_degraded ?? true;
     bind_cellular = c.bind_cellular ?? true;
+    if (c.schedule) sched = { ...sched, ...c.schedule };
     const r = c.request ?? {};
     method = r.method ?? "POST";
     url = r.url ?? "";
@@ -147,7 +170,7 @@
     const hdrs: Record<string, string> = {};
     for (const h of headers) if (h.key.trim()) hdrs[h.key.trim()] = h.value;
     const expect = expectStatus.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
-    const cfg: any = { enabled, interval_seconds, send_when_degraded, bind_cellular };
+    const cfg: any = { enabled, interval_seconds, send_when_degraded, bind_cellular, schedule: sched };
     if (url.trim()) {
       const req: any = {
         method, url: url.trim(), headers: hdrs,
@@ -178,6 +201,11 @@
 
 <div class="row">
   <h1>Monitoring</h1>
+  {#if $status}
+    <span class="badge {$status.monitor_active ? 'green' : 'amber'}" title="Whether a scheduled heartbeat would fire right now">
+      {$status.monitor_active ? "sending now" : "not sending"}
+    </span>
+  {/if}
   <button class="ui-btn ui-btn-sm" on:click={sendNow}>Send heartbeat now</button>
 </div>
 <p class="muted">A global heartbeat sent to your endpoint on a schedule. While connected it goes
@@ -191,6 +219,40 @@
     <label class="muted">interval <input class="ui-input" style="width:80px;display:inline-block" type="number" bind:value={interval_seconds} /> s</label>
     <label><input type="checkbox" bind:checked={send_when_degraded} /> keep sending while degraded</label>
     <label><input type="checkbox" bind:checked={bind_cellular} /> bind to cellular (uncheck for LAN/VPN endpoint)</label>
+  </div>
+</section>
+
+<section class="ui-card">
+  <div class="row">
+    <h2 style="flex:1">Schedule</h2>
+    <label><input type="checkbox" bind:checked={sched.enabled} /> Limit heartbeats to a weekly window</label>
+  </div>
+  <p class="muted">Scheduled probes only fire inside this window (manual “Send heartbeat now” always works).
+    Leave unchecked to send around the clock whenever monitoring is enabled.</p>
+  <fieldset class="sched" disabled={!sched.enabled}>
+    <div class="row">
+      <span class="muted">Days</span>
+      {#each DAY_LABELS as d, i}
+        <button type="button" class="chip" class:on={sched.days.includes(i)} on:click={() => toggleDay(i)}>{d}</button>
+      {/each}
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="muted">from <input class="ui-input" style="width:120px;display:inline-block" type="time" bind:value={sched.start} /></label>
+      <label class="muted">to <input class="ui-input" style="width:120px;display:inline-block" type="time" bind:value={sched.end} /></label>
+      <label class="muted">timezone
+        <select class="ui-select" style="width:auto;display:inline-block" bind:value={sched.timezone}>
+          {#each TIMEZONES as tz}<option>{tz}</option>{/each}
+          {#if !TIMEZONES.includes(sched.timezone)}<option>{sched.timezone}</option>{/if}
+        </select>
+      </label>
+    </div>
+    <p class="muted" style="margin-top:6px">A window ending earlier than it starts (e.g. 22:00→02:00) wraps past midnight.</p>
+  </fieldset>
+  <div class="row" style="margin-top:10px">
+    <span class="muted">Override</span>
+    {#each [["auto", "Follow schedule"], ["on", "Force on"], ["off", "Force off"]] as [val, lbl]}
+      <label><input type="radio" bind:group={sched.override} value={val} /> {lbl}</label>
+    {/each}
   </div>
 </section>
 
@@ -300,3 +362,8 @@
     </tbody>
   </table>
 </section>
+
+<style>
+  fieldset.sched { border: 0; padding: 0; margin: 0; min-width: 0; }
+  fieldset.sched:disabled { opacity: 0.45; }
+</style>

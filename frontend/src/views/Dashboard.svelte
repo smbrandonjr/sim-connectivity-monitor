@@ -4,14 +4,9 @@
   import { api } from "../lib/api";
   import Copyable from "../lib/Copyable.svelte";
   import Sparkline from "../lib/Sparkline.svelte";
+  import { METRICS, classify, tierColor } from "../lib/signal";
 
   let history: any[] = [];
-  const SERIES = [
-    { key: "rsrp", label: "RSRP", unit: "dBm" },
-    { key: "rsrq", label: "RSRQ", unit: "dB" },
-    { key: "sinr", label: "SINR", unit: "dB" },
-    { key: "rssi", label: "RSSI", unit: "dBm" },
-  ];
 
   async function loadTelemetry() {
     history = (await api.telemetry()).history ?? [];
@@ -87,12 +82,71 @@
   </div>
 
   <div class="cards">
-    {#each SERIES as c}
-      <section class="ui-card">
-        <h2>{c.label}</h2>
-        <div class="metric-now">{t[c.key] ?? "—"} <span class="muted">{c.unit}</span></div>
-        <Sparkline values={history.map((r) => r[c.key])} />
+    {#each METRICS as m}
+      {@const v = t[m.key]}
+      {@const tier = typeof v === "number" ? classify(m, v) : null}
+      <section class="ui-card metric">
+        <div class="metric-head">
+          <h2>{m.label}</h2>
+          <span class="info" tabindex="0" role="img" aria-label={m.label + " help"}>
+            i
+            <div class="tip">
+              <p><strong>{m.label}</strong> — {m.what}</p>
+              <table>
+                {#each m.bands as b}
+                  <tr class:current={tier === b.tier}>
+                    <td><span class="qdot {b.tier}"></span></td>
+                    <td>{b.label}</td>
+                    <td class="mono">{b.range}</td>
+                  </tr>
+                {/each}
+              </table>
+            </div>
+          </span>
+          {#if tier}<span class="qbadge {tier}">{tier}</span>{/if}
+        </div>
+        <div class="metric-now" style={tier ? `color:${tierColor(tier)}` : ""}>
+          {v ?? "—"} <span class="muted">{m.unit}</span>
+        </div>
+        <Sparkline values={history.map((r) => r[m.key])} />
       </section>
     {/each}
   </div>
 {/if}
+
+<style>
+  .metric-head { display: flex; align-items: center; gap: 8px; }
+  .metric-head h2 { margin: 0; flex: 0 0 auto; }
+  .qbadge {
+    margin-left: auto; font-size: var(--fs-xs, 11px); text-transform: capitalize;
+    padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor;
+  }
+  .qbadge.excellent { color: var(--status-cyan); }
+  .qbadge.good { color: var(--status-green); }
+  .qbadge.fair { color: var(--status-amber); }
+  .qbadge.poor { color: var(--status-red); }
+
+  .info {
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%; cursor: help;
+    font-size: 11px; font-style: italic; font-weight: 700;
+    color: var(--color-text-muted); border: 1px solid var(--color-border, #444);
+  }
+  .info .tip {
+    position: absolute; top: 130%; left: 0; z-index: 20; width: 280px;
+    padding: 10px 12px; border-radius: 8px; font-style: normal; font-weight: 400;
+    background: var(--color-surface, #1b1f26); color: var(--color-text, #e6e6e6);
+    border: 1px solid var(--color-border, #444); box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    opacity: 0; visibility: hidden; transition: opacity .12s ease; text-align: left;
+  }
+  .info:hover .tip, .info:focus .tip, .info:focus-within .tip { opacity: 1; visibility: visible; }
+  .info .tip p { margin: 0 0 8px; font-size: var(--fs-sm, 13px); line-height: 1.4; }
+  .info .tip table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm, 13px); }
+  .info .tip td { padding: 2px 6px 2px 0; }
+  .info .tip tr.current { font-weight: 700; }
+  .qdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+  .qdot.excellent { background: var(--status-cyan); }
+  .qdot.good { background: var(--status-green); }
+  .qdot.fair { background: var(--status-amber); }
+  .qdot.poor { background: var(--status-red); }
+</style>

@@ -13,6 +13,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import requests
 
@@ -21,6 +22,7 @@ from sim_monitor.core.events import EventLog
 from sim_monitor.core.state_store import StateStore
 from sim_monitor.core.states import State
 from sim_monitor.monitor.placeholders import render, render_body_fields
+from sim_monitor.monitor.schedule import is_active
 from sim_monitor.monitor.transport import make_session
 from sim_monitor.storage.db import Database
 from sim_monitor.system.host import collect_host_metrics, collect_interface_ips
@@ -39,12 +41,16 @@ class HttpMonitor:
         events: EventLog,
         get_config: Callable[[], MonitorConfig | None],
         trigger: threading.Event,
+        wall_clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.store = store
         self.db = db
         self.events = events
         self.get_config = get_config
         self.trigger = trigger
+        # Wall-clock source for schedule windows (injectable for tests); the
+        # monotonic clock still drives interval pacing.
+        self._wall_clock = wall_clock or (lambda: datetime.now(UTC))
         self._next_due: float | None = None
         self._next_public_ip = 0.0
 
@@ -85,7 +91,12 @@ class HttpMonitor:
                 )
             return
         now = time.monotonic()
-        scheduled = config.enabled and (self._next_due is None or now >= self._next_due)
+        in_window = is_active(config.schedule, self._wall_clock())
+        scheduled = (
+            config.enabled
+            and in_window
+            and (self._next_due is None or now >= self._next_due)
+        )
         if not (forced or scheduled):
             return
         snapshot = self.store.get()

@@ -1,10 +1,11 @@
 import threading
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import pytest
 import requests
 
-from sim_monitor.config.schema import Profile
+from sim_monitor.config.schema import MonitorSchedule, Profile
 from sim_monitor.core.events import EventLog
 from sim_monitor.core.state_store import StateStore
 from sim_monitor.core.states import State
@@ -245,4 +246,39 @@ class TestPause:
         monitor._iteration(forced=False)
         monitor.store.update(monitor_paused=False)
         monitor._iteration(forced=False)
+        assert len(session.calls) == 1
+
+
+class TestSchedule:
+    WED_IN = datetime(2025, 6, 11, 14, 0, tzinfo=UTC)   # Wed 10:00 EDT
+    SUN_OUT = datetime(2025, 6, 15, 14, 0, tzinfo=UTC)  # Sun 10:00 EDT
+
+    def _scheduled(self, **kw):
+        cfg = PROFILE.monitor.model_copy(deep=True)
+        cfg.schedule = MonitorSchedule(enabled=True, **kw)
+        return cfg
+
+    def test_scheduled_probe_fires_inside_window(self, env):
+        monitor, session, _ = env
+        cfg = self._scheduled()
+        monitor.get_config = lambda: cfg
+        monitor._wall_clock = lambda: self.WED_IN
+        monitor._iteration(forced=False)
+        assert len(session.calls) == 1
+
+    def test_scheduled_probe_skipped_outside_window(self, env):
+        monitor, session, _ = env
+        cfg = self._scheduled()
+        monitor.get_config = lambda: cfg
+        monitor._wall_clock = lambda: self.SUN_OUT
+        monitor._iteration(forced=False)
+        assert session.calls == []
+        assert monitor._next_due is None  # schedule held; fires when window opens
+
+    def test_manual_send_bypasses_schedule(self, env):
+        monitor, session, _ = env
+        cfg = self._scheduled(override="off")  # even a hard off
+        monitor.get_config = lambda: cfg
+        monitor._wall_clock = lambda: self.SUN_OUT
+        monitor._iteration(forced=True)
         assert len(session.calls) == 1

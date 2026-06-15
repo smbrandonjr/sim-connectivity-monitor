@@ -92,11 +92,14 @@ journalctl -u sim-monitor -f  # watch it walk NO_MODEM -> ... -> CONNECTED
 Browse to `http://<pi-address>:8080` from your LAN.
 
 - **Dashboard** — live state, ICCID/IMEI/operator/signal, IP / gateway / public IP,
-  default-route check, serving-cell details (RAT/band/cell ID), signal telemetry charts,
-  and action buttons (reconnect, reset modem, run monitor probe, fallback test).
+  default-route check, serving-cell details (RAT/band/cell ID), and signal telemetry
+  charts (RSRP/RSRQ/SINR/RSSI) that are colour-coded by quality, with hover tooltips
+  explaining each metric and its good/fair/poor ranges; plus action buttons (reconnect,
+  reset modem, run monitor probe, fallback test).
 - **Profiles** — view/create/edit/delete profiles, force one for testing.
 - **Messages** — SMS inbox and compose/send over the modem.
-- **Monitoring** — heartbeat configuration and recent heartbeat history.
+- **Monitoring** — heartbeat configuration, an optional schedule window, and recent
+  heartbeat history.
 - **Scan** — network tools (host discovery, port scan, reachability checks,
   traceroute), optionally bound to a specific interface.
 - **Timeline** — everything the daemon did (events, URCs, identity changes).
@@ -160,6 +163,12 @@ inserted`). During a fallback test `{status}` is `fallback_test` so you can supp
 alerts for intentional outages. Uncheck **keep sending while degraded** to restore
 pause-until-reconnected behavior, and uncheck **bind to cellular** when your endpoint is
 only reachable over the LAN/VPN (e.g. testing against a local server).
+
+**Schedule (optional):** limit scheduled heartbeats to a weekly window — pick the days,
+a start/end time, and a timezone (default **Mon–Fri, 9am–6pm, America/New_York**). It's
+off by default (send around the clock). A manual **override** can force sending on or off
+regardless of the window, and **Send heartbeat now** always fires. A badge shows whether
+the monitor is sending right now.
 
 ## 8. Test Hologram fallback / outage protection
 

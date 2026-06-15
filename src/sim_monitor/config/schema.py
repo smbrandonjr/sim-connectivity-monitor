@@ -89,6 +89,41 @@ class MonitorRequest(StrictModel):
     expect_status: list[int] = Field(default=[200, 204], min_length=1)
 
 
+class MonitorSchedule(StrictModel):
+    """Optional weekly time window that gates scheduled heartbeats, so probes
+    only fire when someone is watching (e.g. Mon-Fri 9-6 Eastern). The window
+    is opt-in (`enabled`); `override` forces sending on/off regardless. A manual
+    "send now" always bypasses this. The pure decision lives in
+    sim_monitor.monitor.schedule.is_active()."""
+
+    enabled: bool = False
+    timezone: str = "America/New_York"
+    # Python weekday(): Monday=0 .. Sunday=6. Default is Mon-Fri.
+    days: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
+    start: str = Field(default="09:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(default="18:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    # auto = follow the window; on = always send; off = never (scheduled) send.
+    override: Literal["auto", "on", "off"] = "auto"
+
+    @field_validator("days")
+    @classmethod
+    def _valid_days(cls, days: list[int]) -> list[int]:
+        if any(d < 0 or d > 6 for d in days):
+            raise ValueError("schedule days must be 0 (Monday) .. 6 (Sunday)")
+        return sorted(set(days))
+
+    @field_validator("timezone")
+    @classmethod
+    def _valid_timezone(cls, tz: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(tz)
+        except (ZoneInfoNotFoundError, ValueError) as e:
+            raise ValueError(f"unknown timezone {tz!r}") from e
+        return tz
+
+
 class MonitorConfig(StrictModel):
     enabled: bool = False
     interval_seconds: int = Field(default=300, ge=10)
@@ -100,6 +135,8 @@ class MonitorConfig(StrictModel):
     # success PROVES cellular egress. Set false when the endpoint is only
     # reachable via LAN/VPN (e.g. testing against a local server).
     bind_cellular: bool = True
+    # Optional weekly window limiting when scheduled probes fire.
+    schedule: MonitorSchedule = Field(default_factory=MonitorSchedule)
     request: MonitorRequest | None = None
 
     @model_validator(mode="after")

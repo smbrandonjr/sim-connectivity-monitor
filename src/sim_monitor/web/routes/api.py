@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import asdict
+from datetime import UTC
 
 import yaml
 from flask import Blueprint, Response, jsonify, request
@@ -27,10 +28,21 @@ def _snapshot_dict(app) -> dict:
 
 @bp.get("/status.json")
 def status():
+    from datetime import datetime
+
+    from sim_monitor.monitor.schedule import is_active
+
     app = sim()
     data = _snapshot_dict(app)
     last = app.db.recent_monitor_results(limit=1)
     data["last_monitor"] = last[0] if last else None
+    # Whether the heartbeat would fire right now: master switch on, an endpoint
+    # configured, and inside the schedule window (override-aware).
+    cfg = app.daemon.effective_monitor_config()
+    data["monitor_active"] = bool(
+        cfg and cfg.enabled and cfg.request is not None
+        and is_active(cfg.schedule, datetime.now(UTC))
+    )
     return jsonify(data)
 
 

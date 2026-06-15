@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0",
     "requests>=2.31",
     "pydantic>=2.5",
+    "tzdata>=2024.1",  # zoneinfo timezone DB (monitor schedule windows; needed on Windows)
 ]
 
 [project.optional-dependencies]
