@@ -36,3 +36,6 @@ config/profiles.d/*.yaml
 *.local.yaml
 
 /COMPANION-APP-THEME-GUIDE.md
+# local smoke-test logs
+sim_err.log
+sim_out.log
