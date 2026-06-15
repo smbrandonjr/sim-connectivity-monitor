@@ -34,6 +34,7 @@ AT_PORT_HINTS: dict[tuple[int, int], int] = {
     (0x2C7C, 0x0296): 2,  # Quectel BG96
     (0x1E0E, 0x9001): 3,  # SIMCOM SIM7600
     (0x1E0E, 0x9011): 3,  # SIMCOM SIM7600 (RNDIS composition)
+    (0x1E0E, 0x9206): 5,  # SIMCOM SIM7070/7080/7090 (if05 = MM's secondary AT port)
     (0x1BC7, 0x1201): 4,  # Telit LE910C1
     (0x1BC7, 0x0036): 4,  # Telit LE910C4
 }
