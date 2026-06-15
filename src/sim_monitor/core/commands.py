@@ -116,6 +116,11 @@ class SetAtPort:
     device: str  # "" or "auto" -> automatic detection
 
 
+@dataclass(frozen=True)
+class SetRat:
+    rat: str  # a key of driver_base.RAT_LABELS; "auto" = factory default
+
+
 Command = (
     Reconnect
     | ResetModem
@@ -138,6 +143,7 @@ Command = (
     | ScanSerialPorts
     | ProbeAtPort
     | SetAtPort
+    | SetRat
 )
 
 

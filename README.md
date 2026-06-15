@@ -104,7 +104,8 @@ Browse to `http://<pi-address>:8080` from your LAN.
   traceroute), optionally bound to a specific interface.
 - **Timeline** — everything the daemon did (events, URCs, identity changes).
 - **Diagnostics** — guided modem / AT-port setup (test & pick the right serial port for a
-  new modem model), AT command reference, and ad-hoc AT command execution.
+  new modem model), forcing the radio access technology (5G SA/NSA, LTE, LTE-M, NB-IoT,
+  3G, 2G, or automatic), an AT command reference, and ad-hoc AT command execution.
 
 > The UI has no authentication — keep it LAN-only. Don't port-forward it.
 

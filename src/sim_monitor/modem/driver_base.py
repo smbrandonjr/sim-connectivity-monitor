@@ -21,6 +21,21 @@ class ModemError(Exception):
     pass
 
 
+# Canonical radio-access-technology identifiers the UI can force. "auto" is the
+# factory-default: let the modem pick any technology. The display labels are
+# shared by the daemon (event log) and surfaced to the web UI.
+RAT_LABELS: dict[str, str] = {
+    "auto": "Automatic (factory default)",
+    "5g_sa": "5G SA",
+    "5g_nsa": "5G NSA",
+    "lte": "LTE",
+    "lte_m": "LTE-M",
+    "nb_iot": "NB-IoT",
+    "3g": "3G",
+    "2g": "2G",
+}
+
+
 @dataclass(frozen=True)
 class ModemIdentity:
     vendor: str
@@ -122,6 +137,17 @@ class ModemDriver(ABC):
 
     @abstractmethod
     def set_airplane(self, on: bool) -> None: ...
+
+    @abstractmethod
+    def supported_rats(self) -> list[str]:
+        """RAT identifiers (from RAT_LABELS) this modem can be forced to.
+        Models vary within a vendor, so this reflects the driver's known set."""
+
+    @abstractmethod
+    def set_rat(self, rat: str) -> None:
+        """Force the radio access technology (a key of RAT_LABELS). 'auto'
+        restores factory-default automatic selection. Raises ModemError if the
+        modem doesn't support it or rejects the command."""
 
     @abstractmethod
     def reprobe_sim(self) -> None:

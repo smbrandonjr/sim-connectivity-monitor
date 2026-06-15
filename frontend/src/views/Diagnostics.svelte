@@ -8,6 +8,22 @@
   let commands = "";
   let fallbackSeconds = 900;
 
+  // Forceable radio access technologies (newest → oldest).
+  const RATS = [
+    { key: "5g_sa", label: "5G SA" },
+    { key: "5g_nsa", label: "5G NSA" },
+    { key: "lte", label: "LTE" },
+    { key: "lte_m", label: "LTE-M" },
+    { key: "nb_iot", label: "NB-IoT" },
+    { key: "3g", label: "3G" },
+    { key: "2g", label: "2G" },
+  ];
+  $: ratSupported = $status?.rat_supported ?? [];
+  $: currentRat = $status?.telemetry?.rat ?? null;
+  async function setRat(rat: string, label: string) {
+    if (await api.cmd("set-rat", { rat })) toast(`network mode → ${label}`, "ok");
+  }
+
   // Full AT reference (function + sample response), click any to queue it.
   const REFERENCE: { group: string; rows: { cmd: string; fn: string; sample: string }[] }[] = [
     { group: "Identity & SIM", rows: [
@@ -84,6 +100,31 @@
       <label class="muted">for <input class="ui-input" style="width:80px;display:inline-block" type="number" bind:value={fallbackSeconds} /> s</label>
     {/if}
   </div>
+</section>
+
+<section class="ui-card">
+  <div class="row">
+    <h2 style="flex:1">Network mode (RAT)</h2>
+    <span class="muted">current: <strong>{currentRat ?? "—"}</strong></span>
+  </div>
+  <p class="muted">Force the modem onto a specific radio access technology. Options your modem
+    doesn't support are disabled. Forcing a mode briefly drops the connection while it
+    re-attaches; the setting is saved on the modem and persists across reboots.</p>
+  {#if ratSupported.length === 0}
+    <p class="muted">No modem connected.</p>
+  {:else}
+    <div class="row" style="flex-wrap:wrap">
+      {#each RATS as r}
+        <button class="ui-btn ui-btn-sm" disabled={!ratSupported.includes(r.key)}
+          title={ratSupported.includes(r.key) ? `Force ${r.label}` : "Not supported by this modem"}
+          on:click={() => setRat(r.key, r.label)}>{r.label}</button>
+      {/each}
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="ui-btn" on:click={() => setRat("auto", "Automatic")}>Reset to factory default (Automatic)</button>
+      <span class="muted">restores automatic selection of all supported technologies</span>
+    </div>
+  {/if}
 </section>
 
 <section class="ui-card">

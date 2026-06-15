@@ -19,6 +19,21 @@ class QuectelDriver(ATModemDriver):
         'AT+QINDCFG="all",1',     # enable all URC indications
     )
 
+    # nwscanmode: 0 auto, 1 GSM, 2 WCDMA, 3 LTE. iotopmode (Cat-M/NB modems like
+    # BG96): 0 eMTC/LTE-M, 1 NB-IoT. 5G (RM5xx) via QNWPREFCFG; nr5g_disable_mode
+    # 1 disables NSA (SA only), 2 disables SA (NSA only). Models without a given
+    # feature reject the command -- surfaced as a clear event, not a crash.
+    RAT_COMMANDS = {
+        "auto": ['AT+QCFG="nwscanmode",0'],
+        "2g": ['AT+QCFG="nwscanmode",1'],
+        "3g": ['AT+QCFG="nwscanmode",2'],
+        "lte": ['AT+QCFG="nwscanmode",3'],
+        "lte_m": ['AT+QCFG="nwscanmode",3', 'AT+QCFG="iotopmode",0'],
+        "nb_iot": ['AT+QCFG="nwscanmode",3', 'AT+QCFG="iotopmode",1'],
+        "5g_sa": ['AT+QNWPREFCFG="mode_pref",NR5G', 'AT+QNWPREFCFG="nr5g_disable_mode",1'],
+        "5g_nsa": ['AT+QNWPREFCFG="mode_pref",LTE:NR5G', 'AT+QNWPREFCFG="nr5g_disable_mode",2'],
+    }
+
     def get_telemetry(self) -> dict:
         """Rich LTE metrics: QCSQ (RSRP/RSRQ/SINR), serving cell, network info."""
         data: dict = {}

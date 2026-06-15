@@ -125,6 +125,7 @@ class Snapshot:
     fallback: FallbackStatus = field(default_factory=FallbackStatus)
     diagnostics: DiagnosticsReport | None = None
     modem_setup: ModemSetup = field(default_factory=ModemSetup)
+    rat_supported: tuple[str, ...] = ()  # RATs the current modem can be forced to
     monitor_paused: bool = False  # runtime-only; resets on service restart
     sms_unread: int = 0
     telemetry: dict = field(default_factory=dict)  # latest deep link metrics

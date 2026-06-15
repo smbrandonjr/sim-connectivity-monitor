@@ -3,6 +3,7 @@ import pytest
 from sim_monitor.config.schema import PdpContext
 from sim_monitor.modem.at_channel import ATCommandError
 from sim_monitor.modem.at_driver import ATModemDriver
+from sim_monitor.modem.driver_base import ModemError
 from sim_monitor.modem.drivers import QuectelDriver, SimcomDriver, TelitDriver
 
 
@@ -75,6 +76,51 @@ class TestIdentityAndSim:
         sim = QuectelDriver(channel).get_sim_status()
         assert sim.present is False
         assert "no SIM" in sim.detail
+
+
+class TestRat:
+    def _chan(self, *ok_commands):
+        return ScriptedChannel({c: [] for c in ok_commands})
+
+    def test_quectel_lte(self):
+        ch = self._chan('AT+QCFG="nwscanmode",3')
+        QuectelDriver(ch).set_rat("lte")
+        assert ch.executed == ['AT+QCFG="nwscanmode",3']
+
+    def test_quectel_nb_iot_sequence(self):
+        ch = self._chan('AT+QCFG="nwscanmode",3', 'AT+QCFG="iotopmode",1')
+        QuectelDriver(ch).set_rat("nb_iot")
+        assert ch.executed == ['AT+QCFG="nwscanmode",3', 'AT+QCFG="iotopmode",1']
+
+    def test_quectel_5g_sa(self):
+        ch = self._chan('AT+QNWPREFCFG="mode_pref",NR5G',
+                        'AT+QNWPREFCFG="nr5g_disable_mode",1')
+        QuectelDriver(ch).set_rat("5g_sa")
+        assert ch.executed[0].endswith("NR5G")
+        assert "nr5g_disable_mode" in ch.executed[1]
+
+    def test_simcom_lte_m(self):
+        ch = self._chan("AT+CNMP=38", "AT+CMNB=1")
+        SimcomDriver(ch).set_rat("lte_m")
+        assert ch.executed == ["AT+CNMP=38", "AT+CMNB=1"]
+
+    def test_generic_ws46_lte(self):
+        ch = self._chan("AT+WS46=28")
+        ATModemDriver(ch).set_rat("lte")
+        assert ch.executed == ["AT+WS46=28"]
+
+    def test_unsupported_rat_raises_without_io(self):
+        ch = self._chan()
+        with pytest.raises(ModemError):
+            ATModemDriver(ch).set_rat("5g_sa")  # generic 3GPP has no 5G mapping
+        assert ch.executed == []  # rejected before touching the modem
+
+    def test_supported_rats(self):
+        assert set(SimcomDriver(ScriptedChannel()).supported_rats()) == {
+            "auto", "2g", "3g", "lte", "lte_m", "nb_iot",
+        }
+        assert "5g_sa" in QuectelDriver(ScriptedChannel()).supported_rats()
+        assert "5g_sa" not in TelitDriver(ScriptedChannel()).supported_rats()
 
     def test_sim_locked_reports_detail(self):
         driver = QuectelDriver(ScriptedChannel({"AT+CPIN?": ["+CPIN: SIM PIN"]}))

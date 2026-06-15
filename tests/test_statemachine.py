@@ -652,6 +652,30 @@ class TestModemSetup:
         assert harness.daemon.detector.at_port == "auto"
         assert harness.db.get_setting("modem_at_port") is None
 
+    def test_rat_supported_surfaced_when_modem_found(self, harness):
+        harness.run_until(State.CONNECTED)
+        assert "lte" in harness.store.get().rat_supported
+        assert "5g_sa" in harness.store.get().rat_supported  # fake supports all
+
+    def test_set_rat_issues_command_and_reattaches(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.queue.put(cmd.SetRat("lte"))
+        harness.tick()
+        assert "SET_RAT:lte" in harness.driver.at_log
+        # the RAT change triggers a re-attach; it reconnects on its own
+        harness.run_until(State.CONNECTED)
+        assert "rat" in harness.event_kinds()
+
+    def test_set_unsupported_rat_logs_error_and_stays_connected(self, harness):
+        harness.run_until(State.CONNECTED)
+        # Make the fake reject this RAT.
+        harness.driver.supported_rats = lambda: ["auto", "lte"]
+        harness.queue.put(cmd.SetRat("nb_iot"))
+        harness.tick()
+        assert harness.daemon.state is State.CONNECTED  # no disruptive reconnect
+        assert any("could not set network mode" in e["message"]
+                   for e in harness.db.recent_events(500))
+
     def test_persisted_override_applied_on_startup(self, tmp_path):
         h = Harness(tmp_path)
         h.db.set_setting("modem_at_port", "/dev/ttyUSB3")

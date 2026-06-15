@@ -206,6 +206,12 @@ def command(name: str):
                 command_obj = cmd.ProbeAtPort(device=str(body["device"]))
             case "set-at-port":
                 command_obj = cmd.SetAtPort(device=str(body.get("device", "")))
+            case "set-rat":
+                from sim_monitor.modem.driver_base import RAT_LABELS
+                rat = str(body.get("rat", ""))
+                if rat not in RAT_LABELS:
+                    return jsonify({"error": f"unknown RAT {rat!r}"}), 400
+                command_obj = cmd.SetRat(rat=rat)
             case _:
                 return jsonify({"error": f"unknown command {name!r}"}), 404
     except (KeyError, ValueError, TypeError) as e:

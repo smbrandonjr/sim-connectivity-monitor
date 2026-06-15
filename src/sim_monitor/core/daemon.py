@@ -29,7 +29,12 @@ from sim_monitor.core.state_store import (
 )
 from sim_monitor.core.states import State
 from sim_monitor.core.supervisor import RecoveryAction, Supervisor
-from sim_monitor.modem.driver_base import ModemDetector, ModemDriver, ModemError
+from sim_monitor.modem.driver_base import (
+    RAT_LABELS,
+    ModemDetector,
+    ModemDriver,
+    ModemError,
+)
 from sim_monitor.modem.pdp_reconcile import DefineContext, DeleteContext, reconcile
 from sim_monitor.system.backend import BackendError, NetworkBackend
 from sim_monitor.system.sdnotify import SdNotifier
@@ -260,6 +265,8 @@ class Daemon:
                 self._probe_at_port(device)
             case cmd.SetAtPort(device=device):
                 self._set_at_port(device)
+            case cmd.SetRat(rat=rat):
+                self._set_rat(rat)
 
     def _reevaluate_profile(self) -> None:
         """Re-run profile selection after a force/release/reload."""
@@ -470,7 +477,7 @@ class Daemon:
             pass  # cosmetic; don't block bring-up
         self.store.update(
             vendor=identity.vendor, model=identity.model, imei=identity.imei,
-            firmware=firmware,
+            firmware=firmware, rat_supported=tuple(self.driver.supported_rats()),
         )
         if not sim.present:
             self.store.update(sim_present=False, iccid=None, imsi=None, last_error=sim.detail)
@@ -1010,6 +1017,27 @@ class Daemon:
         self._drop_modem()       # re-detect with the new port on the next tick
         self._next_port_scan = 0  # rescan promptly so the UI shows the new 'current'
 
+    def _set_rat(self, rat: str) -> None:
+        """Force the modem's radio access technology, then re-attach on it."""
+        if self.driver is None:
+            self.events.error("rat", "cannot set network mode: no modem")
+            return
+        label = RAT_LABELS.get(rat, rat)
+        try:
+            self.driver.set_rat(rat)
+        except ModemError as e:
+            self.events.error("rat", f"could not set network mode to {label}: {e}")
+            return
+        self.events.info("rat", f"network mode set to {label}; re-attaching")
+        # A RAT change deregisters the modem; proactively reconnect on the new
+        # mode rather than waiting for the connection to be noticed as lost.
+        if self.active_profile is not None and self.state in (
+            S.CONNECTED, S.CONNECTING, S.DEGRADED,
+        ):
+            self._safe_disconnect()
+            self._variant_index = 0
+            self._go(S.CONFIGURING)
+
     def _full_reset_modem(self) -> None:
         """Reset the modem and re-detect from scratch: the USB device
         re-enumerates and ModemManager re-probes. Shared by the manual Reset
@@ -1037,4 +1065,5 @@ class Daemon:
             sim_present=False, iccid=None, imsi=None, sim_name=None,
             interface=None, ip_address=None, gateway=None, public_ip=None,
             active_profile=None, vendor=None, model=None, imei=None,
+            rat_supported=(),
         )

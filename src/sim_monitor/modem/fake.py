@@ -105,6 +105,16 @@ class FakeModemDriver(ModemDriver):
         self._check()
         self.contexts.pop(cid, None)
 
+    def supported_rats(self) -> list[str]:
+        # The simulated modem pretends to be a do-everything module.
+        return ["auto", "5g_sa", "5g_nsa", "lte", "lte_m", "nb_iot", "3g", "2g"]
+
+    def set_rat(self, rat: str) -> None:
+        self._check()
+        if rat not in self.supported_rats():
+            raise ModemError(f"unsupported RAT {rat!r}")
+        self.at_log.append(f"SET_RAT:{rat}")
+
     def set_airplane(self, on: bool) -> None:
         self._check()
         leaving = self.airplane and not on

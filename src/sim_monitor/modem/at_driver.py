@@ -36,6 +36,16 @@ class ATModemDriver(ModemDriver):
     ICCID_COMMAND = "AT+CCID"
     RESET_COMMAND = "AT+CFUN=1,1"
 
+    # rat-identifier -> AT command(s) that force it. 3GPP TS 27.007 AT+WS46
+    # covers the universal RATs; vendor subclasses override with richer sets
+    # (LTE-M/NB-IoT/5G). 25 = all 3GPP, 12 = GSM, 22 = UTRAN, 28 = E-UTRAN.
+    RAT_COMMANDS: dict[str, list[str]] = {
+        "auto": ["AT+WS46=25"],
+        "lte": ["AT+WS46=28"],
+        "3g": ["AT+WS46=22"],
+        "2g": ["AT+WS46=12"],
+    }
+
     # Best-effort URC enablers; vendor subclasses append quirks. Each is sent
     # tolerantly — a modem that rejects one still gets the rest.
     EVENT_REPORTING_COMMANDS = (
@@ -120,6 +130,16 @@ class ATModemDriver(ModemDriver):
 
     def set_airplane(self, on: bool) -> None:
         self.at.execute("AT+CFUN=4" if on else "AT+CFUN=1", timeout=30)
+
+    def supported_rats(self) -> list[str]:
+        return list(self.RAT_COMMANDS.keys())
+
+    def set_rat(self, rat: str) -> None:
+        commands = self.RAT_COMMANDS.get(rat)
+        if commands is None:
+            raise ModemError(f"this modem ({self.name}) cannot force RAT {rat!r}")
+        for command in commands:
+            self.at.execute(command, timeout=15)
 
     def reprobe_sim(self) -> None:
         # Minimal-functionality cycle: re-initializes the SIM session so a newly
