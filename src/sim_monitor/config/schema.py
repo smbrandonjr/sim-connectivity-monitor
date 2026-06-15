@@ -199,6 +199,14 @@ class DaemonConfig(StrictModel):
     # How often to capture deep link telemetry (signal/serving-cell) for the
     # history charts, while connected.
     telemetry_interval_seconds: int = Field(default=30, ge=5)
+    # Some modems (or a ModemManager race at boot) bring the data link up as a
+    # legacy serial PPP link (ppp0) instead of the native wwan/QMI netdev. On
+    # PPP the gateway is usually 0.0.0.0 and cellular can't win the default
+    # route, so reset the modem to coax it back to native mode. Bounded by
+    # ppp_reset_max_attempts so a modem that *only* does PPP doesn't reset-loop
+    # forever -- after the cap it accepts the PPP link to stay online.
+    reset_on_ppp_interface: bool = True
+    ppp_reset_max_attempts: int = Field(default=2, ge=0)
 
 
 class AppConfig(StrictModel):

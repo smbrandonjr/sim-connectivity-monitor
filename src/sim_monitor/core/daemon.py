@@ -49,6 +49,14 @@ BUILTIN_DEFAULT = Profile.model_validate(
 )
 
 
+def is_ppp_interface(name: str | None) -> bool:
+    """True for legacy serial PPP data links (ppp0, ppp1, ...). On a PPP link
+    the modem dialed up over serial instead of exposing a native wwan/QMI
+    netdev, so there's usually no real gateway and cellular can't be made the
+    lowest-metric default route."""
+    return bool(name) and name.startswith("ppp")
+
+
 class Daemon:
     def __init__(
         self,
@@ -95,6 +103,7 @@ class Daemon:
         self._routing_warned = False        # logged the current drift episode?
         self._next_sms_poll = 0.0           # monotonic time of next SMS backstop poll
         self._next_sim_reprobe = 0.0        # when to next nudge a SIM re-read
+        self._ppp_reset_attempts = 0        # bounded modem resets to escape a PPP link
         self.global_monitor: MonitorConfig | None = None
         self._load_global_monitor()
 
@@ -181,13 +190,7 @@ class Daemon:
                     self._go(S.CONFIGURING)
             case cmd.ResetModem():
                 self.events.info("command", "manual modem reset requested")
-                if self.driver:
-                    try:
-                        self.driver.full_reset()
-                    except ModemError as e:
-                        self.events.error("modem", f"reset failed: {e}")
-                self._safe_disconnect()
-                self._drop_modem()
+                self._full_reset_modem()
             case cmd.ForceProfile(name=name):
                 if not any(p.name == name for p in self.profiles):
                     self.events.error("profile", f"cannot force unknown profile {name!r}")
@@ -549,6 +552,8 @@ class Daemon:
                 return
             conn = self.backend.get_connection_state()
         if conn.active and conn.ip_address:
+            if not self._handle_ppp_link(conn.interface):
+                return  # reset the modem to escape the PPP link; re-detect next tick
             self.events.info(
                 "connection", f"connected: {conn.interface} {conn.ip_address}"
             )
@@ -592,6 +597,39 @@ class Daemon:
         else:
             self._variant_index = 0  # next attempt starts from the top
             self._fail(reason)
+
+    def _handle_ppp_link(self, interface: str | None) -> bool:
+        """Decide whether a freshly-active connection is usable as-is.
+
+        Returns True to proceed to CONNECTED. On a legacy PPP link (ppp0) the
+        modem has no native wwan/QMI netdev, so the gateway is typically 0.0.0.0
+        and cellular can't win the default route. When enabled, we reset the
+        modem to coax it back to native mode and return False (the caller backs
+        out; re-detection happens next tick). The number of resets is bounded so
+        a modem that only ever does PPP isn't reset-looped forever -- past the
+        cap we accept the PPP link to stay online."""
+        if not is_ppp_interface(interface):
+            self._ppp_reset_attempts = 0  # healthy native link: re-arm for regressions
+            return True
+        cap = self.config.daemon.ppp_reset_max_attempts
+        if self.config.daemon.reset_on_ppp_interface and self._ppp_reset_attempts < cap:
+            self._ppp_reset_attempts += 1
+            self.events.warning(
+                "connection",
+                f"modem came up on legacy PPP link {interface} (no native "
+                "wwan/QMI netdev; gateway/default-route unreliable); resetting "
+                f"modem to recover native mode (attempt {self._ppp_reset_attempts}/{cap})",
+            )
+            self._full_reset_modem()
+            return False
+        if self._ppp_reset_attempts:  # resets were tried and didn't help
+            self.events.warning(
+                "connection",
+                f"still on PPP link {interface} after {self._ppp_reset_attempts} "
+                "reset attempt(s); accepting it to stay online (native wwan/QMI "
+                "may need manual intervention)",
+            )
+        return True
 
     def _state_connected(self) -> None:
         assert self.driver is not None and self.active_profile is not None
@@ -863,6 +901,18 @@ class Daemon:
             self.backend.disconnect()
         except BackendError as e:
             self.events.warning("connection", f"disconnect failed: {e}")
+
+    def _full_reset_modem(self) -> None:
+        """Reset the modem and re-detect from scratch: the USB device
+        re-enumerates and ModemManager re-probes. Shared by the manual Reset
+        command and the PPP-recovery path."""
+        if self.driver:
+            try:
+                self.driver.full_reset()
+            except ModemError as e:
+                self.events.error("modem", f"reset failed: {e}")
+        self._safe_disconnect()
+        self._drop_modem()
 
     def _drop_modem(self) -> None:
         """Forget the modem and re-detect from scratch (after resets/power cycles)."""

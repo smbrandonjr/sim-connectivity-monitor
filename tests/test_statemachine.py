@@ -555,6 +555,59 @@ class TestRecovery:
         assert harness.daemon.state in (State.DEGRADED, State.NO_MODEM)
 
 
+class TestPppRecovery:
+    """A modem that brings the data link up as legacy PPP (ppp0) instead of the
+    native wwan/QMI netdev: reset to recover, but bounded so it can't loop."""
+
+    def test_resets_on_ppp_then_accepts_after_cap(self, harness):
+        harness.backend.interface = "ppp0"  # modem keeps dialing up over serial
+        harness.run_until(State.CONNECTED, max_ticks=60)
+        # Bounded to the default cap (2), not an infinite reset loop.
+        assert harness.driver.at_log.count("RESET") == 2
+        # Eventually accepted so the device stays online.
+        assert harness.store.get().interface == "ppp0"
+        msgs = [e["message"] for e in harness.db.recent_events(500)]
+        assert any("legacy PPP link ppp0" in m and "resetting modem" in m for m in msgs)
+        assert any("accepting it to stay online" in m for m in msgs)
+
+    def test_native_wwan_link_is_never_reset(self, harness):
+        harness.run_until(State.CONNECTED)
+        assert "RESET" not in harness.driver.at_log
+        assert harness.store.get().interface == "wwan0"
+
+    def test_ppp_reset_disabled_accepts_immediately(self, harness):
+        harness.daemon.config.daemon.reset_on_ppp_interface = False
+        harness.backend.interface = "ppp0"
+        harness.run_until(State.CONNECTED)
+        assert "RESET" not in harness.driver.at_log
+        assert harness.store.get().interface == "ppp0"
+
+    def test_recovering_to_native_stops_resetting(self, harness):
+        harness.backend.interface = "ppp0"
+        # Run until the first PPP reset fires.
+        for _ in range(15):
+            harness.tick()
+            if harness.driver.at_log.count("RESET") == 1:
+                break
+        assert harness.driver.at_log.count("RESET") == 1
+        # The modem now exposes a native netdev; no further resets, connects clean.
+        harness.backend.interface = "wwan0"
+        harness.run_until(State.CONNECTED)
+        assert harness.driver.at_log.count("RESET") == 1
+        assert harness.store.get().interface == "wwan0"
+
+
+def test_is_ppp_interface():
+    from sim_monitor.core.daemon import is_ppp_interface
+
+    assert is_ppp_interface("ppp0")
+    assert is_ppp_interface("ppp1")
+    assert not is_ppp_interface("wwan0")
+    assert not is_ppp_interface("eth0")
+    assert not is_ppp_interface(None)
+    assert not is_ppp_interface("")
+
+
 class TestFallbackTest:
     def test_full_fallback_cycle_with_profile_switch(self, tmp_path):
         h = Harness(tmp_path, profiles=[DEFAULT_PROFILE, FALLBACK_PROFILE])

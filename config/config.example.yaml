@@ -15,6 +15,12 @@ daemon:
   # After the recovery ladder is exhausted on the matched profile, try a
   # built-in default (APN "hologram") as a last-ditch catch-all. false = strict.
   fallback_to_default_profile: true
+  # If the modem comes up on a legacy PPP link (ppp0) instead of the native
+  # wwan/QMI netdev -- where the gateway is usually 0.0.0.0 and cellular can't
+  # win the default route -- reset it to recover native mode. Bounded by
+  # ppp_reset_max_attempts; past the cap the PPP link is accepted to stay online.
+  reset_on_ppp_interface: true
+  ppp_reset_max_attempts: 2
 
 log_level: INFO
 
