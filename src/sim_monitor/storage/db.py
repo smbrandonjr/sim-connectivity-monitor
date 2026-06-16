@@ -74,6 +74,14 @@ CREATE TABLE IF NOT EXISTS telemetry (
     earfcn INTEGER, tac TEXT, operator_numeric TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry(ts);
+CREATE TABLE IF NOT EXISTS connectivity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    up INTEGER NOT NULL,         -- 1 = cellular CONNECTED, 0 = down
+    state TEXT,                  -- daemon state at the edge
+    detail TEXT                  -- reason (e.g. last_error) when going down
+);
+CREATE INDEX IF NOT EXISTS idx_connectivity_ts ON connectivity(ts);
 CREATE TABLE IF NOT EXISTS sim_names (
     iccid TEXT PRIMARY KEY,
     name TEXT NOT NULL
@@ -311,6 +319,49 @@ class Database:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM telemetry ORDER BY ts DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── connectivity uptime log (one row per connected<->down edge) ──────
+    def add_connectivity(self, up: bool, state: str | None, detail: str | None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO connectivity (ts, up, state, detail) VALUES (?, ?, ?, ?)",
+                (time.time(), int(up), state, detail),
+            )
+            self._prune("connectivity")
+            self._conn.commit()
+
+    def connectivity_last(self) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM connectivity ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
+
+    def connectivity_first_ts(self) -> float | None:
+        """Timestamp of the earliest connectivity record (the data horizon)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT ts FROM connectivity ORDER BY id ASC LIMIT 1"
+            ).fetchone()
+        return row["ts"] if row else None
+
+    def connectivity_state_at(self, t: float) -> dict | None:
+        """The connectivity edge in effect at time t (latest row at or before t)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM connectivity WHERE ts <= ? ORDER BY ts DESC, id DESC LIMIT 1",
+                (t,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def connectivity_between(self, t0: float, t1: float) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM connectivity WHERE ts >= ? AND ts <= ?"
+                " ORDER BY ts ASC, id ASC",
+                (t0, t1),
             ).fetchall()
         return [dict(r) for r in rows]
 

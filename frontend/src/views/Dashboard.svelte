@@ -5,9 +5,13 @@
   import Copyable from "../lib/Copyable.svelte";
   import Sparkline from "../lib/Sparkline.svelte";
   import ModemSetup from "../lib/ModemSetup.svelte";
+  import ConnectivityHistory from "../lib/ConnectivityHistory.svelte";
   import { METRICS, classify, tierColor } from "../lib/signal";
+  import { dur } from "../lib/format";
 
   let history: any[] = [];
+  $: nowS = $status?.server_time ?? Date.now() / 1000;
+  $: stateDur = $status ? nowS - $status.state_since : 0;
 
   async function loadTelemetry() {
     history = (await api.telemetry()).history ?? [];
@@ -89,6 +93,18 @@
         <dt>EARFCN / TAC</dt><dd>{t.earfcn ?? "—"} / {t.tac ?? "—"}</dd>
       </dl>
     </section>
+
+    <section class="ui-card">
+      <h2>Uptime</h2>
+      <dl>
+        <dt>Cellular</dt>
+        <dd class={s.state === "CONNECTED" ? "ok" : "bad"}>
+          {#if s.state === "CONNECTED"}connected for {dur(stateDur)}
+          {:else}{s.state.toLowerCase().replace("_", " ")} for {dur(stateDur)}{/if}
+        </dd>
+        <dt>Device (since boot)</dt><dd>{s.device_uptime_s != null ? dur(s.device_uptime_s) : "—"}</dd>
+      </dl>
+    </section>
   </div>
 
   <div class="cards">
@@ -122,9 +138,13 @@
       </section>
     {/each}
   </div>
+
+  <ConnectivityHistory />
 {/if}
 
 <style>
+  dd.ok { color: var(--status-green); }
+  dd.bad { color: var(--status-amber); }
   .metric-head { display: flex; align-items: center; gap: 8px; }
   .metric-head h2 { margin: 0; flex: 0 0 auto; }
   .qbadge {

@@ -91,7 +91,9 @@ journalctl -u sim-monitor -f  # watch it walk NO_MODEM -> ... -> CONNECTED
 
 Browse to `http://<pi-address>:8080` from your LAN.
 
-- **Dashboard** — live state, ICCID/IMEI/operator/signal, IP / gateway / public IP,
+- **Dashboard** — device & cellular **uptime** (live, plus a searchable connectivity
+  history with uptime %, outage count/duration, and a timeline over any timeframe);
+  live state, ICCID/IMEI/operator/signal, IP / gateway / public IP,
   default-route check, serving-cell details (RAT/band/cell ID), and signal telemetry
   charts (RSRP/RSRQ/SINR/RSSI) that are colour-coded by quality, with hover tooltips
   explaining each metric and its good/fair/poor ranges; plus action buttons (reconnect,

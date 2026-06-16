@@ -31,11 +31,16 @@ def status():
     from datetime import datetime
 
     from sim_monitor.monitor.schedule import is_active
+    from sim_monitor.system.host import collect_host_metrics
 
     app = sim()
     data = _snapshot_dict(app)
     last = app.db.recent_monitor_results(limit=1)
     data["last_monitor"] = last[0] if last else None
+    # Live uptime: device uptime (Linux /proc) + server clock so the UI can
+    # render "connected for N" from state_since without clock-skew guessing.
+    data["device_uptime_s"] = collect_host_metrics().get("uptime_s")
+    data["server_time"] = time.time()
     # Whether the heartbeat would fire right now: master switch on, an endpoint
     # configured, and inside the schedule window (override-aware).
     cfg = app.daemon.effective_monitor_config()
@@ -44,6 +49,33 @@ def status():
         and is_active(cfg.schedule, datetime.now(UTC))
     )
     return jsonify(data)
+
+
+@bp.get("/connectivity.json")
+def connectivity():
+    """Cellular-uptime summary + outage episodes for a time window. Query params
+    `from`/`to` are epoch seconds; defaults to the last 24h."""
+    from sim_monitor.core.uptime import summarize
+
+    db = sim().db
+    now = time.time()
+    to = request.args.get("to", type=float) or now
+    frm = request.args.get("from", type=float) or (to - 86400)
+    to = min(to, now)
+    if frm > to:
+        frm = to
+    # Don't count time before we have any data (e.g. just-installed device);
+    # clamp the window start to the data horizon so uptime% reflects reality.
+    data_since = db.connectivity_first_ts()
+    if data_since is not None and frm < data_since:
+        frm = min(data_since, to)
+    start = db.connectivity_state_at(frm)
+    start_up = bool(start["up"]) if start else False
+    start_detail = start["detail"] if start else None
+    edges = [(r["ts"], bool(r["up"]), r["detail"]) for r in db.connectivity_between(frm, to)]
+    summary = summarize(start_up, edges, frm, to, start_detail)
+    summary["data_since"] = data_since
+    return jsonify(summary)
 
 
 @bp.get("/urcs.json")

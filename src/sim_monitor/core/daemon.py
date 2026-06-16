@@ -130,6 +130,13 @@ class Daemon:
             modem_setup=ModemSetup(at_port=getattr(self.detector, "at_port", "auto")),
         )
 
+        # Connectivity uptime log: seed last-known state, then mark this start as
+        # a down edge (any service-down gap counts as downtime; no-ops if we were
+        # already down).
+        last_conn = self.db.connectivity_last()
+        self._conn_up: bool | None = bool(last_conn["up"]) if last_conn else None
+        self._record_connectivity(False, S.NO_MODEM.value, "monitor started")
+
     def _load_global_monitor(self) -> None:
         """Load the global heartbeat config from the device DB (UI-managed)."""
         raw = self.db.get_setting("monitor")
@@ -185,6 +192,20 @@ class Daemon:
             self.events.info("state", f"{self.state.value} -> {state.value}")
             self.state = state
         self.store.set_state(state, **fields)
+        connected = state is S.CONNECTED
+        self._record_connectivity(
+            connected, state.value, None if connected else self.store.get().last_error
+        )
+
+    def _record_connectivity(self, connected: bool, state: str, detail: str | None) -> None:
+        """Log a connectivity edge (connected<->down) once per change."""
+        if self._conn_up is connected:
+            return
+        self._conn_up = connected
+        try:
+            self.db.add_connectivity(connected, state, detail)
+        except Exception:  # noqa: BLE001 - an analytics write must never break the loop
+            log.debug("connectivity log write failed", exc_info=True)
 
     def _fail(self, reason: str) -> None:
         planned = self.supervisor.on_failure(self.clock(), reason)

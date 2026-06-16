@@ -689,6 +689,24 @@ class TestModemSetup:
         assert d.detector.at_port == "/dev/ttyUSB3"
 
 
+class TestConnectivityLog:
+    def test_records_up_then_down_edges(self, harness):
+        harness.run_until(State.CONNECTED)
+        assert harness.db.connectivity_last()["up"] == 1
+        harness.backend.drop_connection = True
+        harness.tick()  # connection lost -> DEGRADED
+        assert harness.daemon.state is State.DEGRADED
+        assert harness.db.connectivity_last()["up"] == 0
+        ups = [r["up"] for r in harness.db.connectivity_between(0, 2e10)]
+        assert ups[0] == 0 and 1 in ups and ups[-1] == 0  # started down, up, down
+
+    def test_no_duplicate_edges_while_connected(self, harness):
+        harness.run_until(State.CONNECTED)
+        n = len(harness.db.connectivity_between(0, 2e10))
+        harness.tick(3)  # stays connected — no new edges
+        assert len(harness.db.connectivity_between(0, 2e10)) == n
+
+
 class TestFallbackTest:
     def test_full_fallback_cycle_with_profile_switch(self, tmp_path):
         h = Harness(tmp_path, profiles=[DEFAULT_PROFILE, FALLBACK_PROFILE])
