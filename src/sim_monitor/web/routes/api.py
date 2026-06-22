@@ -318,6 +318,34 @@ def monitor_config_put():
     return jsonify({"ok": True})
 
 
+@bp.get("/latency-config.json")
+def latency_config_get():
+    """The effective per-interface latency monitor config: the UI-managed setting
+    if saved, else the config.yaml default. Edits hot-reload on the next cycle."""
+    app = sim()
+    raw = app.db.get_setting("latency")
+    return jsonify(raw or app.config.latency.model_dump(mode="json"))
+
+
+@bp.put("/latency-config")
+def latency_config_put():
+    from sim_monitor.config.schema import LatencyConfig
+
+    body = _body()
+    try:
+        config = LatencyConfig.model_validate(body)
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    app = sim()
+    app.db.set_setting("latency", config.model_dump(mode="json"))
+    app.events.info(
+        "latency",
+        f"latency monitor config updated (enabled={config.enabled}, "
+        f"interval={config.interval_seconds}s)",
+    )
+    return jsonify({"ok": True})
+
+
 @bp.get("/profiles.json")
 def profiles_list():
     app = sim()

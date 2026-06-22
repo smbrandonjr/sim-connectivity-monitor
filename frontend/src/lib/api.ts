@@ -46,6 +46,21 @@ export const api = {
     return getJSON<any>(`/api/latency.json?${q.toString()}`);
   },
   monitorConfig: () => getJSON<any>("/api/monitor-config.json"),
+  latencyConfig: () => getJSON<any>("/api/latency-config.json"),
+
+  async saveLatencyConfig(cfg: Record<string, unknown>): Promise<boolean> {
+    const res = await fetch("/api/latency-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(data.error || "save failed", "error");
+      return false;
+    }
+    return true;
+  },
   placeholders: () => getJSON<Record<string, any>>("/api/placeholders.json"),
   scanStatus: () => getJSON<any>("/api/scan.json"),
   scanInterfaces: () => getJSON<any[]>("/api/scan/interfaces.json"),

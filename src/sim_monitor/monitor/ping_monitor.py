@@ -32,6 +32,20 @@ _MAX_WORKERS = 8
 _ROLLUP_PERIODS = ("hour", "day")
 
 
+def effective_latency_config(db: Database, default: LatencyConfig) -> LatencyConfig:
+    """The latency config in effect now: the UI-managed setting stored in the DB
+    if present (and valid), else the config.yaml default. Read fresh each probe
+    cycle so UI edits hot-reload without restarting the thread."""
+    raw = db.get_setting("latency")
+    if not raw:
+        return default
+    try:
+        return LatencyConfig.model_validate(raw)
+    except Exception as e:  # noqa: BLE001 - bad stored config must not wedge probing
+        log.warning("invalid stored latency config (%s); using config default", e)
+        return default
+
+
 class PingMonitor:
     def __init__(
         self,

@@ -26,6 +26,10 @@ daemon:
 # (cellular + any wifi/ethernet) against the targets every interval, so the
 # Latency tab can show whether a problem is cellular-only or systemic. Raw
 # samples roll up into hourly/daily aggregates for ~30-day review.
+#
+# This block is the boot/default. Once you save settings from the Latency tab
+# they're stored in the device DB and OVERRIDE this block (and hot-reload on the
+# next cycle, no restart). Edit here for headless/fleet provisioning.
 latency:
   enabled: false             # set true to start probing
   interval_seconds: 60       # raise to throttle (e.g. 300 = every 5 min)

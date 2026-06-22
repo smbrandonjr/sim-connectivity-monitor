@@ -262,3 +262,33 @@ def test_trigger_defaults_when_omitted():
     mon = PingMonitor(store=store, db=db, events=EventLog(db), get_config=_config)
     assert isinstance(mon.trigger, threading.Event)
     db.close()
+
+
+class TestEffectiveConfig:
+    def test_falls_back_to_default_when_unset(self):
+        from sim_monitor.monitor.ping_monitor import effective_latency_config
+
+        db = Database(":memory:")
+        default = _config(enabled=False, interval_seconds=60)
+        assert effective_latency_config(db, default) is default
+        db.close()
+
+    def test_db_setting_overrides_default(self):
+        from sim_monitor.monitor.ping_monitor import effective_latency_config
+
+        db = Database(":memory:")
+        default = _config(enabled=False, interval_seconds=60)
+        stored = _config(enabled=True, interval_seconds=120)
+        db.set_setting("latency", stored.model_dump(mode="json"))
+        eff = effective_latency_config(db, default)
+        assert eff.enabled is True and eff.interval_seconds == 120
+        db.close()
+
+    def test_invalid_stored_config_falls_back(self):
+        from sim_monitor.monitor.ping_monitor import effective_latency_config
+
+        db = Database(":memory:")
+        default = _config(enabled=True, interval_seconds=60)
+        db.set_setting("latency", {"interval_seconds": 1})  # below ge=10 -> invalid
+        assert effective_latency_config(db, default) is default
+        db.close()

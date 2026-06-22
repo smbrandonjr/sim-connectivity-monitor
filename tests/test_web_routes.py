@@ -180,6 +180,31 @@ class TestLatencyJson:
         assert data["interfaces"] == ["eth0"]
 
 
+class TestLatencyConfig:
+    def test_get_returns_config_default(self, sim, client):
+        data = client.get("/api/latency-config.json").get_json()
+        assert "enabled" in data and "targets" in data
+        assert data["enabled"] is False  # default off
+
+    def test_put_persists_and_hot_reloads(self, sim, client):
+        from sim_monitor.monitor.ping_monitor import effective_latency_config
+
+        body = {"enabled": True, "interval_seconds": 90, "packet_count": 3,
+                "targets": ["1.1.1.1", "8.8.8.8"]}
+        resp = client.put("/api/latency-config", json=body)
+        assert resp.status_code == 200 and resp.get_json()["ok"] is True
+        # stored + reflected back through the GET endpoint
+        got = client.get("/api/latency-config.json").get_json()
+        assert got["enabled"] is True and got["interval_seconds"] == 90
+        # the resolver the ping thread uses now sees the new config (hot-reload)
+        eff = effective_latency_config(sim.db, sim.config.latency)
+        assert eff.enabled is True and eff.interval_seconds == 90
+
+    def test_put_invalid_400(self, sim, client):
+        resp = client.put("/api/latency-config", json={"interval_seconds": 1})
+        assert resp.status_code == 400
+
+
 class TestTelemetryJson:
     def test_telemetry(self, sim, client):
         tick_until_connected(sim)

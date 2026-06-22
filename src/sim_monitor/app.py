@@ -82,6 +82,7 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
     from sim_monitor.monitor.ping_monitor import (
         SIMULATE_INTERFACES,
         PingMonitor,
+        effective_latency_config,
         make_fake_pinger,
     )
     from sim_monitor.web import server
@@ -116,7 +117,7 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
         store=app.store,
         db=app.db,
         events=app.events,
-        get_config=lambda: app.config.latency,
+        get_config=lambda: effective_latency_config(app.db, app.config.latency),
         **ping_kwargs,
     )
     ping_thread = threading.Thread(
