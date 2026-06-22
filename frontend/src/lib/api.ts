@@ -45,6 +45,13 @@ export const api = {
     if (iface) q.set("interface", iface);
     return getJSON<any>(`/api/latency.json?${q.toString()}`);
   },
+  latencyCsvUrl: (from?: number, to?: number, iface?: string) => {
+    const q = new URLSearchParams();
+    if (from != null) q.set("from", String(Math.floor(from)));
+    if (to != null) q.set("to", String(Math.floor(to)));
+    if (iface) q.set("interface", iface);
+    return `/api/latency.csv?${q.toString()}`;
+  },
   monitorConfig: () => getJSON<any>("/api/monitor-config.json"),
   latencyConfig: () => getJSON<any>("/api/latency-config.json"),
 

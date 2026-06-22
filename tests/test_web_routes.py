@@ -179,6 +179,23 @@ class TestLatencyJson:
         ).get_json()
         assert data["interfaces"] == ["eth0"]
 
+    def test_csv_export(self, sim, client):
+        import time as _t
+
+        now = _t.time()
+        sim.db.add_icmp_samples(now - 30, [
+            {"interface": "wwan0", "target": "1.1.1.1", "sent": 5, "received": 4,
+             "loss_pct": 20.0, "rtt_avg_ms": 40.0, "rtt_min_ms": 30.0, "rtt_max_ms": 50.0},
+        ])
+        resp = client.get(f"/api/latency.csv?from={now - 3600}&to={now}")
+        assert resp.status_code == 200
+        assert resp.mimetype == "text/csv"
+        assert "attachment" in resp.headers["Content-Disposition"]
+        body = resp.get_data(as_text=True)
+        lines = body.strip().splitlines()
+        assert lines[0].startswith("ts_iso,ts_epoch,source,interface,target")
+        assert "wwan0,1.1.1.1,5,4,20.0,40.0,30.0,50.0" in body
+
 
 class TestLatencyConfig:
     def test_get_returns_config_default(self, sim, client):

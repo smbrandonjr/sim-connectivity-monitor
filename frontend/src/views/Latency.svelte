@@ -156,6 +156,40 @@
   $: lossSeries = data ? perInterface("loss") : {};
   $: headline = data?.headline ?? {};
 
+  // Per (interface, target) digest over the window, computed from the series.
+  function buildSummary(d: any) {
+    if (!d?.series) return [];
+    const rows: any[] = [];
+    for (const [key, pts] of Object.entries<any>(d.series)) {
+      const [iface, target] = key.split("|");
+      const rtts = pts.map((p: any) => p.rtt_avg_ms).filter((v: any) => v != null);
+      const mins = pts.map((p: any) => p.rtt_min_ms).filter((v: any) => v != null);
+      const maxs = pts.map((p: any) => p.rtt_max_ms).filter((v: any) => v != null);
+      const losses = pts.map((p: any) => p.loss_pct).filter((v: any) => v != null);
+      rows.push({
+        iface, target, samples: pts.length,
+        avg: rtts.length ? rtts.reduce((a: number, b: number) => a + b, 0) / rtts.length : null,
+        min: mins.length ? Math.min(...mins) : null,
+        max: maxs.length ? Math.max(...maxs) : null,
+        loss: losses.length ? losses.reduce((a: number, b: number) => a + b, 0) / losses.length : null,
+      });
+    }
+    rows.sort((a, b) => (a.iface === b.iface ? a.target.localeCompare(b.target) : a.iface.localeCompare(b.iface)));
+    return rows;
+  }
+  $: summaryRows = buildSummary(data);
+
+  function exportCsv() {
+    if (!data) return;
+    const url = api.latencyCsvUrl(data.window_start, data.window_end, ifaceFilter || undefined);
+    const a = document.createElement("a");
+    a.href = url;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
   function pct(v: number | null | undefined) { return v == null ? "—" : v.toFixed(v >= 99.95 ? 1 : 2) + "%"; }
   function ms(v: number | null | undefined) { return v == null ? "—" : Math.round(v) + " ms"; }
   const SOURCE_LABEL: Record<string, string> = { raw: "per-probe", hour: "hourly avg", day: "daily avg" };
@@ -247,6 +281,38 @@
       <LatencyChart series={lossSeries} {colorOf} {cellular}
         windowStart={data.window_start} windowEnd={data.window_end} unit="%" valueFloor={0} valueCeil={100} />
 
+      <div class="row" style="margin-top:18px">
+        <h3 class="ttl" style="flex:1;margin:0">Summary <span class="muted">({SOURCE_LABEL[data.source] ?? data.source} over window)</span></h3>
+        <button class="ui-btn ui-btn-sm" on:click={exportCsv} title="Download this window as CSV">
+          <i class="ri-download-2-line"></i> Export CSV
+        </button>
+      </div>
+      <div class="tablewrap">
+        <table class="summary">
+          <thead>
+            <tr>
+              <th>Interface</th><th>Target</th><th class="num">Samples</th>
+              <th class="num">Avg</th><th class="num">Min</th><th class="num">Max</th><th class="num">Loss</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each summaryRows as r}
+              <tr>
+                <td><span class="sw" style="background:{colorOf(r.iface)}"></span><span class="mono">{r.iface}{r.iface === cellular ? " ·cell" : ""}</span></td>
+                <td class="mono">{r.target}</td>
+                <td class="num">{r.samples}</td>
+                <td class="num">{ms(r.avg)}</td>
+                <td class="num">{ms(r.min)}</td>
+                <td class="num">{ms(r.max)}</td>
+                <td class="num" class:bad={r.loss != null && r.loss >= 1}>{pct(r.loss)}</td>
+              </tr>
+            {:else}
+              <tr><td colspan="7" class="muted">no rows in this window</td></tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+
       <p class="muted foot">
         {ts(data.window_start)} → {ts(data.window_end)} · {loading ? "refreshing…" : "live"}
       </p>
@@ -303,4 +369,15 @@
     background: none; border: none; padding: 0; cursor: pointer;
     color: var(--color-primary); text-decoration: underline; font: inherit;
   }
+
+  .tablewrap { overflow-x: auto; margin-top: 6px; }
+  table.summary { width: 100%; border-collapse: collapse; font-size: var(--fs-sm, 13px); }
+  table.summary th, table.summary td {
+    text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--color-border, #2a2a2a);
+    white-space: nowrap;
+  }
+  table.summary th { color: var(--color-text-muted); font-weight: 600; font-size: var(--fs-xs, 11px); text-transform: uppercase; letter-spacing: .03em; }
+  table.summary td .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 6px; }
+  table.summary .num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.summary td.bad { color: var(--status-red, #ef4444); font-weight: 600; }
 </style>

@@ -78,6 +78,28 @@ def connectivity():
     return jsonify(summary)
 
 
+def _latency_window() -> tuple[float, float, str | None]:
+    """Parse from/to/interface query params (epoch seconds; default last 24h)."""
+    now = time.time()
+    to = request.args.get("to", type=float) or now
+    frm = request.args.get("from", type=float) or (to - 86400)
+    to = min(to, now)
+    if frm > to:
+        frm = to
+    return frm, to, request.args.get("interface") or None
+
+
+def _latency_rows(db, frm: float, to: float, interface: str | None):
+    """Pick the data source by window size: raw samples for short ranges, then
+    hourly, then daily rollups. Returns (rows, ts_key, source)."""
+    span = to - frm
+    if span <= 2 * 86400:
+        return db.icmp_samples_between(frm, to, interface=interface), "ts", "raw"
+    if span <= 14 * 86400:
+        return db.icmp_rollups_between("hour", frm, to, interface=interface), "bucket_start", "hour"
+    return db.icmp_rollups_between("day", frm, to, interface=interface), "bucket_start", "day"
+
+
 @bp.get("/latency.json")
 def latency():
     """Per-interface latency + packet-loss series for a window. Query params
@@ -88,27 +110,46 @@ def latency():
     from sim_monitor.core.latency import summarize_latency
 
     db = sim().db
-    now = time.time()
-    to = request.args.get("to", type=float) or now
-    frm = request.args.get("from", type=float) or (to - 86400)
-    to = min(to, now)
-    if frm > to:
-        frm = to
-    interface = request.args.get("interface") or None
-    span = to - frm
-    if span <= 2 * 86400:
-        rows = db.icmp_samples_between(frm, to, interface=interface)
-        ts_key, source = "ts", "raw"
-    elif span <= 14 * 86400:
-        rows = db.icmp_rollups_between("hour", frm, to, interface=interface)
-        ts_key, source = "bucket_start", "hour"
-    else:
-        rows = db.icmp_rollups_between("day", frm, to, interface=interface)
-        ts_key, source = "bucket_start", "day"
+    frm, to, interface = _latency_window()
+    rows, ts_key, source = _latency_rows(db, frm, to, interface)
     summary = summarize_latency(rows, frm, to, ts_key=ts_key)
     summary["source"] = source
     summary["cellular_interface"] = sim().store.get().interface
     return jsonify(summary)
+
+
+@bp.get("/latency.csv")
+def latency_csv():
+    """The window's latency/loss rows as CSV (same source resolution as
+    latency.json), for spreadsheet export. One row per (timestamp, interface,
+    target)."""
+    import csv
+    import io
+
+    db = sim().db
+    frm, to, interface = _latency_window()
+    rows, ts_key, source = _latency_rows(db, frm, to, interface)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "ts_iso", "ts_epoch", "source", "interface", "target",
+        "sent", "received", "loss_pct", "rtt_avg_ms", "rtt_min_ms", "rtt_max_ms",
+    ])
+    for r in rows:
+        epoch = r[ts_key]
+        iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+        writer.writerow([
+            iso, f"{epoch:.0f}", source, r["interface"], r["target"],
+            r.get("sent"), r.get("received"), r.get("loss_pct"),
+            r.get("rtt_avg_ms"), r.get("rtt_min_ms"), r.get("rtt_max_ms"),
+        ])
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    name = f"sim-monitor-latency-{source}-{stamp}.csv"
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
 
 
 @bp.get("/urcs.json")
