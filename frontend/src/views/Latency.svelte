@@ -15,6 +15,7 @@
     timeout_seconds: 2,
     raw_retention_days: 7,
     rollup_retention_days: 30,
+    interface_colors: {} as Record<string, string>,
   };
   let targetsText = "1.1.1.1\n1.0.0.1\n8.8.8.8\n8.8.4.4\n9.9.9.9";
   let interfacesText = ""; // empty = auto-enumerate every up interface
@@ -33,6 +34,7 @@
         timeout_seconds: c.timeout_seconds ?? 2,
         raw_retention_days: c.raw_retention_days ?? 7,
         rollup_retention_days: c.rollup_retention_days ?? 30,
+        interface_colors: { ...(c.interface_colors ?? {}) },
       };
       targetsText = (c.targets ?? []).join("\n");
       interfacesText = (c.interfaces ?? []).join(", ");
@@ -149,9 +151,33 @@
   }
 
   $: interfaces = (data?.interfaces ?? []) as string[];
-  $: colorIndex = Object.fromEntries(interfaces.map((i, idx) => [i, idx]));
-  const colorOf = (iface: string) => PALETTE[(colorIndex[iface] ?? 0) % PALETTE.length];
+  // Deterministic default colour from the interface name, so the same interface
+  // looks identical on every device without any config. A saved override (from
+  // settings / config.yaml) takes precedence.
+  function defaultColor(iface: string) {
+    let h = 0;
+    for (let i = 0; i < iface.length; i++) h = (h * 31 + iface.charCodeAt(i)) >>> 0;
+    return PALETTE[h % PALETTE.length];
+  }
+  // Reactive so editing a colour in settings recolours the charts live.
+  $: colorOf = (iface: string) => cfg.interface_colors?.[iface] || defaultColor(iface);
   $: cellular = data?.cellular_interface ?? null;
+
+  function setColor(iface: string, hex: string) {
+    cfg = { ...cfg, interface_colors: { ...cfg.interface_colors, [iface]: hex } };
+  }
+  function onColorInput(iface: string, e: Event) {
+    setColor(iface, (e.currentTarget as HTMLInputElement).value);
+  }
+  function resetColor(iface: string) {
+    const m = { ...cfg.interface_colors };
+    delete m[iface];
+    cfg = { ...cfg, interface_colors: m };
+  }
+  // Interfaces we can colour: those seen in the data plus any already pinned.
+  $: colorableIfaces = Array.from(
+    new Set([...(data?.interfaces ?? []), ...Object.keys(cfg.interface_colors ?? {})]),
+  ).sort();
   $: rttSeries = data ? perInterface("rtt") : {};
   $: lossSeries = data ? perInterface("loss") : {};
   $: headline = data?.headline ?? {};
@@ -238,6 +264,24 @@
             <input class="ui-input" bind:value={excludeText} placeholder="e.g. docker0" /></label>
         </div>
       </div>
+
+      {#if colorableIfaces.length}
+        <div class="colors">
+          <span class="lbl">interface colors <span class="hint">(consistent across devices)</span></span>
+          <div class="swatches">
+            {#each colorableIfaces as iface}
+              <div class="cpick" title={cfg.interface_colors?.[iface] ? "custom" : "auto (from name)"}>
+                <input type="color" value={colorOf(iface)}
+                  on:input={(e) => onColorInput(iface, e)} />
+                <span class="mono">{iface}</span>
+                {#if cfg.interface_colors?.[iface]}
+                  <button class="x" title="reset to auto" on:click={() => resetColor(iface)}>×</button>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
 
       <div class="actions">
         <span class="muted hint">Changes apply on the next probe cycle — no restart needed.</span>
@@ -365,6 +409,21 @@
   .settings .ta { font-family: var(--font-mono, monospace); resize: vertical; width: 100%; }
   .settings .actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .settings .hint { font-size: var(--fs-xs, 11px); opacity: .7; font-weight: 400; }
+
+  .settings .colors { display: flex; flex-direction: column; gap: 6px; }
+  .settings .colors .lbl { font-size: var(--fs-xs, 11px); color: var(--color-text-muted); }
+  .settings .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+  .settings .cpick {
+    display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs, 11px);
+    border: 1px solid var(--color-border, #333); border-radius: 6px; padding: 3px 6px 3px 4px;
+  }
+  .settings .cpick input[type="color"] {
+    width: 22px; height: 22px; padding: 0; border: none; background: none; cursor: pointer; border-radius: 4px;
+  }
+  .settings .cpick .x {
+    background: none; border: none; color: var(--color-text-muted); cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 0 2px;
+  }
   .linkish {
     background: none; border: none; padding: 0; cursor: pointer;
     color: var(--color-primary); text-decoration: underline; font: inherit;

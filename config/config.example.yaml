@@ -45,6 +45,9 @@ latency:
   exclude_interfaces: []     # names to skip (e.g. a busy management bridge)
   raw_retention_days: 7      # keep per-cycle samples this long
   rollup_retention_days: 30  # keep hourly/daily aggregates this long
+  # Optional: pin chart colors per interface so they match across your fleet.
+  # Unset interfaces get a stable color derived from their name. "#rrggbb".
+  interface_colors: {}       # e.g. {wwan0: "#f59e0b", eth0: "#22c55e", wlan0: "#3b82f6"}
 
 log_level: INFO
 

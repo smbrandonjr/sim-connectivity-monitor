@@ -7,6 +7,7 @@ failures deep in the daemon.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -170,6 +171,18 @@ class LatencyConfig(StrictModel):
     exclude_interfaces: list[str] = Field(default_factory=list)
     raw_retention_days: int = Field(default=7, ge=1, le=90)
     rollup_retention_days: int = Field(default=30, ge=1, le=400)
+    # Display-only: pin a chart colour per interface (e.g. {"wlan0": "#3b82f6"})
+    # so the same interface looks identical across devices. Unset interfaces get
+    # a deterministic colour from their name. Values are "#rrggbb".
+    interface_colors: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("interface_colors")
+    @classmethod
+    def _valid_hex_colors(cls, colors: dict[str, str]) -> dict[str, str]:
+        for iface, hexval in colors.items():
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}", hexval):
+                raise ValueError(f"interface_colors[{iface}] must be #rrggbb, got {hexval!r}")
+        return colors
 
 
 def _validate_context_set(contexts: list[PdpContext], label: str) -> None:

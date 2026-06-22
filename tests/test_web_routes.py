@@ -221,6 +221,16 @@ class TestLatencyConfig:
         resp = client.put("/api/latency-config", json={"interval_seconds": 1})
         assert resp.status_code == 400
 
+    def test_interface_colors_roundtrip(self, sim, client):
+        body = {"enabled": True, "interface_colors": {"wlan0": "#3b82f6", "wwan0": "#f59e0b"}}
+        assert client.put("/api/latency-config", json=body).status_code == 200
+        got = client.get("/api/latency-config.json").get_json()
+        assert got["interface_colors"]["wlan0"] == "#3b82f6"
+
+    def test_interface_colors_bad_hex_400(self, sim, client):
+        resp = client.put("/api/latency-config", json={"interface_colors": {"wlan0": "blue"}})
+        assert resp.status_code == 400
+
 
 class TestTelemetryJson:
     def test_telemetry(self, sim, client):
