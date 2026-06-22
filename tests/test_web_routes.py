@@ -134,6 +134,52 @@ class TestTimelineAndBundle:
         assert page2["results"][0]["url"] != page["results"][0]["url"]
 
 
+class TestLatencyJson:
+    def test_empty_window_ok(self, sim, client):
+        data = client.get("/api/latency.json").get_json()
+        assert data["interfaces"] == []
+        assert data["series"] == {}
+        assert data["source"] == "raw"
+
+    def test_raw_samples_returned_and_summarized(self, sim, client):
+        import time as _t
+
+        now = _t.time()
+        sim.db.add_icmp_samples(now - 30, [
+            {"interface": "wwan0", "target": "1.1.1.1", "sent": 5, "received": 5,
+             "loss_pct": 0.0, "rtt_avg_ms": 40.0, "rtt_min_ms": 30.0, "rtt_max_ms": 50.0},
+            {"interface": "eth0", "target": "1.1.1.1", "sent": 5, "received": 4,
+             "loss_pct": 20.0, "rtt_avg_ms": 8.0, "rtt_min_ms": 7.0, "rtt_max_ms": 9.0},
+        ])
+        data = client.get(f"/api/latency.json?from={now - 3600}&to={now}").get_json()
+        assert set(data["interfaces"]) == {"wwan0", "eth0"}
+        assert "wwan0|1.1.1.1" in data["series"]
+        assert data["headline"]["eth0"]["loss_pct"] == 20.0
+
+    def test_long_window_uses_rollups(self, sim, client):
+        import time as _t
+
+        now = _t.time()
+        # a daily window (>14d) should hit the 'day' rollup source
+        data = client.get(f"/api/latency.json?from={now - 30 * 86400}&to={now}").get_json()
+        assert data["source"] == "day"
+
+    def test_interface_filter(self, sim, client):
+        import time as _t
+
+        now = _t.time()
+        sim.db.add_icmp_samples(now - 30, [
+            {"interface": "wwan0", "target": "1.1.1.1", "sent": 5, "received": 5,
+             "loss_pct": 0.0, "rtt_avg_ms": 40.0, "rtt_min_ms": 30.0, "rtt_max_ms": 50.0},
+            {"interface": "eth0", "target": "1.1.1.1", "sent": 5, "received": 5,
+             "loss_pct": 0.0, "rtt_avg_ms": 8.0, "rtt_min_ms": 7.0, "rtt_max_ms": 9.0},
+        ])
+        data = client.get(
+            f"/api/latency.json?from={now - 3600}&to={now}&interface=eth0"
+        ).get_json()
+        assert data["interfaces"] == ["eth0"]
+
+
 class TestTelemetryJson:
     def test_telemetry(self, sim, client):
         tick_until_connected(sim)

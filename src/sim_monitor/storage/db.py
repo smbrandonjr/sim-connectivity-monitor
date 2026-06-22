@@ -82,6 +82,35 @@ CREATE TABLE IF NOT EXISTS connectivity (
     detail TEXT                  -- reason (e.g. last_error) when going down
 );
 CREATE INDEX IF NOT EXISTS idx_connectivity_ts ON connectivity(ts);
+CREATE TABLE IF NOT EXISTS icmp_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    interface TEXT NOT NULL,
+    target TEXT NOT NULL,
+    sent INTEGER NOT NULL,
+    received INTEGER NOT NULL,
+    loss_pct REAL NOT NULL,
+    rtt_avg_ms REAL,
+    rtt_min_ms REAL,
+    rtt_max_ms REAL
+);
+CREATE INDEX IF NOT EXISTS idx_icmp_samples_ts ON icmp_samples(ts);
+CREATE TABLE IF NOT EXISTS icmp_rollups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bucket_start REAL NOT NULL,
+    period TEXT NOT NULL,            -- 'hour' | 'day'
+    interface TEXT NOT NULL,
+    target TEXT NOT NULL,
+    sample_count INTEGER NOT NULL,
+    sent INTEGER NOT NULL,
+    received INTEGER NOT NULL,
+    loss_pct REAL NOT NULL,
+    rtt_avg_ms REAL,
+    rtt_min_ms REAL,
+    rtt_max_ms REAL,
+    UNIQUE(period, bucket_start, interface, target)
+);
+CREATE INDEX IF NOT EXISTS idx_icmp_rollups_bucket ON icmp_rollups(period, bucket_start);
 CREATE TABLE IF NOT EXISTS sim_names (
     iccid TEXT PRIMARY KEY,
     name TEXT NOT NULL
@@ -410,6 +439,112 @@ class Database:
                 "SELECT COUNT(*) AS n FROM sms WHERE direction='in' AND status='unread'"
             ).fetchone()
         return row["n"]
+
+    # ── per-interface ICMP latency / packet loss ─────────────────────────
+    _ICMP_SAMPLE_COLS = (
+        "interface", "target", "sent", "received",
+        "loss_pct", "rtt_avg_ms", "rtt_min_ms", "rtt_max_ms",
+    )
+
+    def add_icmp_samples(self, ts: float, rows: list[dict[str, Any]]) -> None:
+        """Bulk-insert one probe cycle's per-(interface,target) results."""
+        if not rows:
+            return
+        params = [
+            (ts, *[r.get(c) for c in self._ICMP_SAMPLE_COLS]) for r in rows
+        ]
+        cols = ", ".join(self._ICMP_SAMPLE_COLS)
+        with self._lock:
+            self._conn.executemany(
+                f"INSERT INTO icmp_samples (ts, {cols})"  # noqa: S608 — cols are internal
+                f" VALUES (?, {', '.join('?' * len(self._ICMP_SAMPLE_COLS))})",
+                params,
+            )
+            self._conn.commit()
+
+    def icmp_samples_between(
+        self, t0: float, t1: float, interface: str | None = None
+    ) -> list[dict]:
+        query = "SELECT * FROM icmp_samples WHERE ts >= ? AND ts <= ?"
+        args: list[Any] = [t0, t1]
+        if interface:
+            query += " AND interface = ?"
+            args.append(interface)
+        query += " ORDER BY ts ASC, id ASC"
+        with self._lock:
+            rows = self._conn.execute(query, args).fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_icmp_rollups(self, period: str, rows: list[dict[str, Any]]) -> None:
+        """Insert-or-replace aggregate buckets (idempotent on re-fold)."""
+        if not rows:
+            return
+        params = [
+            (
+                r["bucket_start"], period, r["interface"], r["target"],
+                r["sample_count"], r["sent"], r["received"], r["loss_pct"],
+                r.get("rtt_avg_ms"), r.get("rtt_min_ms"), r.get("rtt_max_ms"),
+            )
+            for r in rows
+        ]
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO icmp_rollups"
+                " (bucket_start, period, interface, target, sample_count,"
+                "  sent, received, loss_pct, rtt_avg_ms, rtt_min_ms, rtt_max_ms)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(period, bucket_start, interface, target) DO UPDATE SET"
+                "  sample_count=excluded.sample_count, sent=excluded.sent,"
+                "  received=excluded.received, loss_pct=excluded.loss_pct,"
+                "  rtt_avg_ms=excluded.rtt_avg_ms, rtt_min_ms=excluded.rtt_min_ms,"
+                "  rtt_max_ms=excluded.rtt_max_ms",
+                params,
+            )
+            self._conn.commit()
+
+    def icmp_rollups_between(
+        self, period: str, t0: float, t1: float, interface: str | None = None
+    ) -> list[dict]:
+        query = (
+            "SELECT * FROM icmp_rollups WHERE period = ?"
+            " AND bucket_start >= ? AND bucket_start <= ?"
+        )
+        args: list[Any] = [period, t0, t1]
+        if interface:
+            query += " AND interface = ?"
+            args.append(interface)
+        query += " ORDER BY bucket_start ASC, id ASC"
+        with self._lock:
+            rows = self._conn.execute(query, args).fetchall()
+        return [dict(r) for r in rows]
+
+    def icmp_last_rollup_bucket(self, period: str) -> float | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MAX(bucket_start) AS m FROM icmp_rollups WHERE period = ?",
+                (period,),
+            ).fetchone()
+        return row["m"] if row and row["m"] is not None else None
+
+    def icmp_interfaces(self, since: float = 0.0) -> list[str]:
+        """Distinct interfaces seen in raw samples at/after `since`."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT interface FROM icmp_samples WHERE ts >= ?"
+                " ORDER BY interface",
+                (since,),
+            ).fetchall()
+        return [r["interface"] for r in rows]
+
+    def prune_older_than(self, table: str, cutoff: float, ts_col: str = "ts") -> None:
+        """Delete rows older than `cutoff` (epoch seconds). Time-based retention
+        for high-volume tables that the fixed-row `_prune` would churn through."""
+        with self._lock:
+            self._conn.execute(
+                f"DELETE FROM {table} WHERE {ts_col} < ?",  # noqa: S608 — internal args
+                (cutoff,),
+            )
+            self._conn.commit()
 
     def _prune(self, table: str) -> None:
         # Caller holds the lock.

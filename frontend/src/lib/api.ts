@@ -38,6 +38,13 @@ export const api = {
     if (to != null) q.set("to", String(Math.floor(to)));
     return getJSON<any>(`/api/connectivity.json?${q.toString()}`);
   },
+  latency: (from?: number, to?: number, iface?: string) => {
+    const q = new URLSearchParams();
+    if (from != null) q.set("from", String(Math.floor(from)));
+    if (to != null) q.set("to", String(Math.floor(to)));
+    if (iface) q.set("interface", iface);
+    return getJSON<any>(`/api/latency.json?${q.toString()}`);
+  },
   monitorConfig: () => getJSON<any>("/api/monitor-config.json"),
   placeholders: () => getJSON<Record<string, any>>("/api/placeholders.json"),
   scanStatus: () => getJSON<any>("/api/scan.json"),

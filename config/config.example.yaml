@@ -22,6 +22,26 @@ daemon:
   reset_on_ppp_interface: true
   ppp_reset_max_attempts: 2
 
+# Per-interface latency + packet-loss monitor. Pings each up interface
+# (cellular + any wifi/ethernet) against the targets every interval, so the
+# Latency tab can show whether a problem is cellular-only or systemic. Raw
+# samples roll up into hourly/daily aggregates for ~30-day review.
+latency:
+  enabled: false             # set true to start probing
+  interval_seconds: 60       # raise to throttle (e.g. 300 = every 5 min)
+  targets:                   # major public DNS anycast IPs
+    - 1.1.1.1
+    - 1.0.0.1
+    - 8.8.8.8
+    - 8.8.4.4
+    - 9.9.9.9
+  packet_count: 5            # pings per target per cycle (loss granularity)
+  timeout_seconds: 2
+  interfaces: []             # [] = auto-enumerate every up interface each cycle
+  exclude_interfaces: []     # names to skip (e.g. a busy management bridge)
+  raw_retention_days: 7      # keep per-cycle samples this long
+  rollup_retention_days: 30  # keep hourly/daily aggregates this long
+
 log_level: INFO
 
 # SQLite database for events + monitor history.

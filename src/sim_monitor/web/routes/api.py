@@ -78,6 +78,39 @@ def connectivity():
     return jsonify(summary)
 
 
+@bp.get("/latency.json")
+def latency():
+    """Per-interface latency + packet-loss series for a window. Query params
+    `from`/`to` are epoch seconds (default last 24h); optional `interface`
+    filters to one. Source resolution auto-scales by window: raw samples for
+    short ranges, hourly then daily rollups for longer ones, to keep payloads
+    small while still covering ~30 days."""
+    from sim_monitor.core.latency import summarize_latency
+
+    db = sim().db
+    now = time.time()
+    to = request.args.get("to", type=float) or now
+    frm = request.args.get("from", type=float) or (to - 86400)
+    to = min(to, now)
+    if frm > to:
+        frm = to
+    interface = request.args.get("interface") or None
+    span = to - frm
+    if span <= 2 * 86400:
+        rows = db.icmp_samples_between(frm, to, interface=interface)
+        ts_key, source = "ts", "raw"
+    elif span <= 14 * 86400:
+        rows = db.icmp_rollups_between("hour", frm, to, interface=interface)
+        ts_key, source = "bucket_start", "hour"
+    else:
+        rows = db.icmp_rollups_between("day", frm, to, interface=interface)
+        ts_key, source = "bucket_start", "day"
+    summary = summarize_latency(rows, frm, to, ts_key=ts_key)
+    summary["source"] = source
+    summary["cellular_interface"] = sim().store.get().interface
+    return jsonify(summary)
+
+
 @bp.get("/urcs.json")
 def urcs():
     return jsonify(sim().db.recent_urcs(limit=300))

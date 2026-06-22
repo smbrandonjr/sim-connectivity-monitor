@@ -50,12 +50,16 @@ def scan_host(host: str, ports: list[int], timeout: float = 0.5) -> dict:
 
 
 _PING_RX = re.compile(r"(\d+) packets transmitted, (\d+) (?:packets )?received")
-_RTT_RX = re.compile(r"=\s*[\d.]+/([\d.]+)/")
+# rtt min/avg/max/mdev = 10.1/12.4/15.8/1.2 ms — capture min, avg, max.
+_RTT_RX = re.compile(r"=\s*([\d.]+)/([\d.]+)/([\d.]+)/")
 
 
 def ping_host(host: str, interface: str | None = None,
               count: int = 4, timeout: int = 2, runner=proc.run) -> dict:
-    """Run system ping (optionally bound to an interface). Returns loss/rtt."""
+    """Run system ping (optionally bound to an interface). Returns loss/rtt.
+
+    Keys: sent, received, loss_pct, avg_ms (back-compat) plus min_ms/max_ms.
+    RTT fields are None when no packets came back (100% loss)."""
     args = ["ping", "-n", "-c", str(count), "-W", str(timeout)]
     if interface:
         args += ["-I", interface]
@@ -68,12 +72,15 @@ def ping_host(host: str, interface: str | None = None,
     m = _PING_RX.search(out)
     if m:
         sent, recv = int(m.group(1)), int(m.group(2))
-    rtt = None
+    min_ms = avg_ms = max_ms = None
     r = _RTT_RX.search(out)
     if r:
-        rtt = float(r.group(1))
+        min_ms, avg_ms, max_ms = float(r.group(1)), float(r.group(2)), float(r.group(3))
     loss = round((1 - recv / sent) * 100, 1) if sent else 100.0
-    return {"sent": sent, "received": recv, "loss_pct": loss, "avg_ms": rtt}
+    return {
+        "sent": sent, "received": recv, "loss_pct": loss,
+        "avg_ms": avg_ms, "min_ms": min_ms, "max_ms": max_ms,
+    }
 
 
 def http_probe(url: str, interface: str | None = None, timeout: float = 8) -> dict:

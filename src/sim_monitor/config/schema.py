@@ -150,6 +150,28 @@ class FallbackTestConfig(StrictModel):
     airplane_seconds: int = Field(default=900, ge=10, le=7200)
 
 
+class LatencyConfig(StrictModel):
+    """Per-interface ICMP latency + packet-loss probing. Global (device-level),
+    not per-profile: it pings each up interface (cellular + any wifi/ethernet)
+    against the configured targets so a cellular-only problem can be told apart
+    from a systemic one. Raw samples roll up into hourly/daily aggregates for
+    long-term review."""
+
+    enabled: bool = False
+    interval_seconds: int = Field(default=60, ge=10)  # lower = denser, raise to throttle
+    targets: list[str] = Field(
+        default=["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9"],
+        min_length=1,
+    )
+    packet_count: int = Field(default=5, ge=1, le=20)  # pings per target per cycle
+    timeout_seconds: int = Field(default=2, ge=1, le=30)
+    # Interfaces to probe. Empty = auto-enumerate every up interface each cycle.
+    interfaces: list[str] = Field(default_factory=list)
+    exclude_interfaces: list[str] = Field(default_factory=list)
+    raw_retention_days: int = Field(default=7, ge=1, le=90)
+    rollup_retention_days: int = Field(default=30, ge=1, le=400)
+
+
 def _validate_context_set(contexts: list[PdpContext], label: str) -> None:
     """Each context set must have unique CIDs and exactly one bearer (a single
     context is auto-promoted). Mutates `contexts` to set the implicit bearer."""
@@ -250,6 +272,7 @@ class AppConfig(StrictModel):
     web: WebConfig = Field(default_factory=WebConfig)
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
     modem: ModemConfig = Field(default_factory=ModemConfig)
+    latency: LatencyConfig = Field(default_factory=LatencyConfig)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     db_path: Path = Path("sim-monitor.db")
     profiles_dir: Path = Path("config/profiles.d")
