@@ -13,9 +13,10 @@
   export let valueFloor: number | null = null; // force y-axis lower bound (e.g. 0)
   export let valueCeil: number | null = null;   // force y-axis upper bound (e.g. 100)
 
-  const W = 720;
+  // Wide, short aspect so `height:auto` stays a sane height at full card width.
+  const W = 1100;
   const H = 200;
-  const PAD = { l: 44, r: 12, t: 10, b: 22 };
+  const PAD = { l: 46, r: 14, t: 12, b: 22 };
 
   $: ifaces = Object.keys(series);
   $: allVals = ifaces.flatMap((i) => series[i].map((p) => p.value).filter((v): v is number => v != null));
@@ -49,11 +50,12 @@
 
 {#if allVals.length >= 1}
   <svg class="chart" viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet">
-    {#each yTicks as t}
+    {#each yTicks as t, i}
       <line class="grid" x1={PAD.l} x2={W - PAD.r} y1={yOf(t)} y2={yOf(t)} />
-      <text class="ylab" x={PAD.l - 6} y={yOf(t) + 3} text-anchor="end">{fmt(t)}</text>
+      <text class="ylab" x={PAD.l - 6} y={yOf(t) + 3} text-anchor="end">
+        {fmt(t)}{i === yTicks.length - 1 && unit ? " " + unit : ""}
+      </text>
     {/each}
-    <text class="ylab unit" x={PAD.l - 6} y={PAD.t - 1} text-anchor="end">{unit}</text>
     {#each ifaces as iface}
       <path
         d={pathFor(series[iface])}
@@ -72,8 +74,7 @@
 {/if}
 
 <style>
-  .chart { width: 100%; height: auto; display: block; }
+  .chart { width: 100%; height: auto; max-height: 260px; display: block; }
   .grid { stroke: var(--color-border, #2a2a2a); stroke-width: 1; opacity: 0.5; }
-  .ylab, .xlab { fill: var(--color-text-muted, #888); font-size: 10px; font-family: var(--font-mono, monospace); }
-  .unit { font-weight: 600; }
+  .ylab, .xlab { fill: var(--color-text-muted, #888); font-size: 11px; font-family: var(--font-mono, monospace); }
 </style>

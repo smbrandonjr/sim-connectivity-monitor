@@ -178,37 +178,39 @@
 
   {#if showSettings}
     <div class="settings">
-      <div class="row wrap">
-        <label class="sw"><input type="checkbox" bind:checked={cfg.enabled} /> Enabled</label>
-        <label class="muted">interval
-          <input class="ui-input n" type="number" min="10" bind:value={cfg.interval_seconds} /> s</label>
-        <label class="muted">pings/target
-          <input class="ui-input n" type="number" min="1" max="20" bind:value={cfg.packet_count} /></label>
-        <label class="muted">timeout
-          <input class="ui-input n" type="number" min="1" max="30" bind:value={cfg.timeout_seconds} /> s</label>
+      <label class="toggle"><input type="checkbox" bind:checked={cfg.enabled} /> <span>Enabled</span></label>
+
+      <div class="nums">
+        <label>interval (s)
+          <input class="ui-input" type="number" min="10" bind:value={cfg.interval_seconds} /></label>
+        <label>pings / target
+          <input class="ui-input" type="number" min="1" max="20" bind:value={cfg.packet_count} /></label>
+        <label>timeout (s)
+          <input class="ui-input" type="number" min="1" max="30" bind:value={cfg.timeout_seconds} /></label>
+        <label>keep raw (days)
+          <input class="ui-input" type="number" min="1" max="90" bind:value={cfg.raw_retention_days} /></label>
+        <label>keep rollups (days)
+          <input class="ui-input" type="number" min="1" max="400" bind:value={cfg.rollup_retention_days} /></label>
       </div>
-      <div class="row wrap">
-        <label class="muted col">targets (one per line, or comma/space separated)
-          <textarea class="ui-input ta" rows="4" bind:value={targetsText}
+
+      <div class="two">
+        <label>targets <span class="hint">(one per line, or comma/space separated)</span>
+          <textarea class="ui-input ta" rows="5" bind:value={targetsText}
             placeholder="1.1.1.1&#10;8.8.8.8"></textarea></label>
-        <div class="col grow">
-          <label class="muted">interfaces <span class="hint">(empty = auto: every up interface)</span>
+        <div class="ifaces">
+          <label>interfaces <span class="hint">(empty = auto: every up interface)</span>
             <input class="ui-input" bind:value={interfacesText} placeholder="auto" /></label>
-          <label class="muted">exclude interfaces
+          <label>exclude interfaces
             <input class="ui-input" bind:value={excludeText} placeholder="e.g. docker0" /></label>
         </div>
       </div>
-      <div class="row wrap">
-        <label class="muted">keep raw samples
-          <input class="ui-input n" type="number" min="1" max="90" bind:value={cfg.raw_retention_days} /> days</label>
-        <label class="muted">keep rollups
-          <input class="ui-input n" type="number" min="1" max="400" bind:value={cfg.rollup_retention_days} /> days</label>
-        <span style="flex:1"></span>
+
+      <div class="actions">
+        <span class="muted hint">Changes apply on the next probe cycle — no restart needed.</span>
         <button class="ui-btn ui-btn-primary ui-btn-sm" on:click={saveConfig} disabled={saving}>
           {saving ? "Saving…" : "Save settings"}
         </button>
       </div>
-      <p class="muted hint">Changes apply on the next probe cycle — no restart needed.</p>
     </div>
   {/if}
 
@@ -277,17 +279,26 @@
 
   .settings {
     border: 1px solid var(--color-border, #333); border-radius: 8px;
-    padding: 12px; margin: 10px 0 4px; display: flex; flex-direction: column; gap: 10px;
+    padding: 14px; margin: 10px 0 4px; display: flex; flex-direction: column; gap: 14px;
     background: var(--color-surface-2, rgba(127,127,127,.05));
   }
-  .settings .row.wrap { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
-  .settings label { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs, 11px); }
-  .settings label.sw { flex-direction: row; align-items: center; gap: 6px; }
-  .settings .col { min-width: 220px; }
-  .settings .col.grow { flex: 1; gap: 8px; }
-  .settings .ui-input.n { width: 70px; }
-  .settings .ui-input.ta { font-family: var(--font-mono, monospace); resize: vertical; }
-  .settings .hint { font-size: var(--fs-xs, 11px); opacity: .7; }
+  .settings label {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: var(--fs-xs, 11px); color: var(--color-text-muted);
+  }
+  .settings .toggle {
+    flex-direction: row; align-items: center; gap: 8px;
+    width: max-content; font-size: var(--fs-sm, 13px); color: var(--color-text);
+  }
+  .settings .nums { display: flex; flex-wrap: wrap; gap: 14px; }
+  .settings .nums label { width: 120px; }
+  .settings .nums .ui-input { width: 100%; }
+  .settings .two { display: flex; flex-wrap: wrap; gap: 18px; }
+  .settings .two > label { flex: 1; min-width: 240px; }
+  .settings .ifaces { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 12px; }
+  .settings .ta { font-family: var(--font-mono, monospace); resize: vertical; width: 100%; }
+  .settings .actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .settings .hint { font-size: var(--fs-xs, 11px); opacity: .7; font-weight: 400; }
   .linkish {
     background: none; border: none; padding: 0; cursor: pointer;
     color: var(--color-primary); text-decoration: underline; font: inherit;
