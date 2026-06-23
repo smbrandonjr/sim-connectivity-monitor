@@ -85,3 +85,21 @@ class TestRenderBodyFields:
 
     def test_empty_fields_is_empty_object(self):
         assert render_body_fields([], {}) == "{}"
+
+    def test_deep_nesting_coexists_under_meta(self):
+        # The latency placeholders land at meta.latency.* and must merge with
+        # other meta.* fields rather than clobbering the meta object.
+        fields = [
+            self._f("meta.imei", "imei"),
+            self._f("meta.latency.last_ms", "latency_ms"),
+            self._f("meta.latency.avg_ms_1h", "latency_1h"),
+            self._f("meta.latency.loss_pct_1h", "loss_1h"),
+        ]
+        ctx = {"imei": "490154", "latency_ms": 42.6, "latency_1h": 47.2, "loss_1h": 1.4}
+        out = json.loads(render_body_fields(fields, ctx))
+        assert out == {
+            "meta": {
+                "imei": "490154",
+                "latency": {"last_ms": 42.6, "avg_ms_1h": 47.2, "loss_pct_1h": 1.4},
+            },
+        }
