@@ -92,11 +92,18 @@
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
+  // Zoom: an explicit epoch window (set by drag-zoom) overrides the preset /
+  // custom range. A stack lets "zoom out" step back through prior windows.
+  let zoomWindow: { from: number; to: number } | null = null;
+  let zoomStack: { from: number; to: number }[] = [];
+
   async function load() {
     loading = true;
     try {
       let from: number | null, to: number | null;
-      if (presetS != null) {
+      if (zoomWindow) {
+        from = zoomWindow.from; to = zoomWindow.to;
+      } else if (presetS != null) {
         to = Date.now() / 1000;
         from = to - presetS;
       } else {
@@ -111,16 +118,38 @@
     loading = false;
   }
 
-  function pickPreset(s: number) { presetS = s; load(); }
+  function clearZoom() { zoomWindow = null; zoomStack = []; }
+  function pickPreset(s: number) { clearZoom(); presetS = s; load(); }
   function useCustom() {
     if (data) { fromStr = toLocalInput(data.window_start); toStr = toLocalInput(data.window_end); }
+    clearZoom();
     presetS = null;
   }
+
+  function onZoom(e: CustomEvent<{ from: number; to: number }>) {
+    if (data) zoomStack = [...zoomStack, { from: data.window_start, to: data.window_end }];
+    zoomWindow = { from: e.detail.from, to: e.detail.to };
+    load();
+  }
+  function zoomOut() {
+    if (zoomStack.length) {
+      zoomWindow = zoomStack[zoomStack.length - 1];
+      zoomStack = zoomStack.slice(0, -1);
+    } else if (zoomWindow) {
+      // widen 2× around the centre so you can always keep zooming out
+      const c = (zoomWindow.from + zoomWindow.to) / 2;
+      const half = zoomWindow.to - zoomWindow.from;
+      zoomWindow = { from: c - half, to: c + half };
+    } else { return; }
+    load();
+  }
+  function resetZoom() { clearZoom(); load(); }
 
   onMount(() => {
     load();
     loadConfig();
-    timer = setInterval(() => { if (presetS != null) load(); }, 15000);
+    // Live-refresh only while showing a "now"-anchored preset (not zoomed/custom).
+    timer = setInterval(() => { if (presetS != null && !zoomWindow) load(); }, 15000);
   });
   onDestroy(() => clearInterval(timer));
 
@@ -317,13 +346,24 @@
         {/each}
       </div>
 
-      <h3 class="ttl">Latency <span class="muted">({SOURCE_LABEL[data.source] ?? data.source})</span></h3>
+      <div class="row charthdr">
+        <h3 class="ttl" style="flex:1;margin:0">Latency <span class="muted">({SOURCE_LABEL[data.source] ?? data.source})</span></h3>
+        <span class="muted hint">drag to zoom</span>
+        {#if zoomWindow}
+          <button class="chip" on:click={zoomOut} title="Zoom out one step">
+            <i class="ri-zoom-out-line"></i> out
+          </button>
+          <button class="chip" on:click={resetZoom} title="Back to the selected range">reset</button>
+        {/if}
+      </div>
       <LatencyChart series={rttSeries} {colorOf} {cellular}
-        windowStart={data.window_start} windowEnd={data.window_end} unit="ms" valueFloor={0} />
+        windowStart={data.window_start} windowEnd={data.window_end} unit="ms" valueFloor={0}
+        on:zoom={onZoom} />
 
       <h3 class="ttl">Packet loss</h3>
       <LatencyChart series={lossSeries} {colorOf} {cellular}
-        windowStart={data.window_start} windowEnd={data.window_end} unit="%" valueFloor={0} valueCeil={100} />
+        windowStart={data.window_start} windowEnd={data.window_end} unit="%" valueFloor={0} valueCeil={100}
+        on:zoom={onZoom} />
 
       <div class="row" style="margin-top:18px">
         <h3 class="ttl" style="flex:1;margin:0">Summary <span class="muted">({SOURCE_LABEL[data.source] ?? data.source} over window)</span></h3>
@@ -358,7 +398,7 @@
       </div>
 
       <p class="muted foot">
-        {ts(data.window_start)} → {ts(data.window_end)} · {loading ? "refreshing…" : "live"}
+        {ts(data.window_start)} → {ts(data.window_end)} · {loading ? "refreshing…" : zoomWindow ? "zoomed" : "live"}
       </p>
     {:else}
       <p class="muted">No latency samples in this window.
@@ -377,6 +417,8 @@
 <style>
   .seg { display: flex; gap: 4px; flex-wrap: wrap; }
   .ttl { font-size: var(--fs-sm); margin: 16px 0 4px; color: var(--color-text-muted); }
+  .charthdr { align-items: center; gap: 10px; margin: 16px 0 4px; }
+  .charthdr .hint { font-size: var(--fs-xs, 11px); opacity: .65; }
   .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
   .lg {
     display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
