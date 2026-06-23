@@ -396,6 +396,22 @@ class TestMonitorConfigApi:
         ctx = client.get("/api/placeholders.json").get_json()
         assert ctx["iccid"] == "8944500612345678901"
         assert "rsrp" in ctx and "status" in ctx and "sampled_at" in ctx
+        # latency placeholders always present (None until data exists)
+        assert "latency_ms" in ctx and "loss_pct" in ctx
+        assert "latency_24h" in ctx and "loss_1h" in ctx
+
+    def test_placeholders_include_latency_values(self, sim, client):
+        import time as _t
+
+        tick_until_connected(sim)
+        iface = sim.store.get().interface
+        sim.db.add_icmp_samples(_t.time() - 20, [
+            {"interface": iface, "target": "1.1.1.1", "sent": 5, "received": 5,
+             "loss_pct": 0.0, "rtt_avg_ms": 42.0, "rtt_min_ms": 40.0, "rtt_max_ms": 44.0},
+        ])
+        ctx = client.get("/api/placeholders.json").get_json()
+        assert ctx["latency_ms"] == 42.0 and ctx["loss_pct"] == 0.0
+        assert ctx["latency_24h"] == 42.0
 
     def test_profile_override_wins_when_enabled(self, sim, client):
         # Global disabled; an enabled profile monitor overrides it.

@@ -33,6 +33,25 @@ PUBLIC_IP_URL = "https://api.ipify.org"
 PUBLIC_IP_INTERVAL = 300  # seconds
 
 
+def latency_placeholder_context(db: Database, interface: str | None) -> dict:
+    """Cellular latency/loss heartbeat placeholders (latency_ms/loss_pct +
+    1h/3h/6h/24h windows) for the given interface, from the last 24h of raw
+    ICMP samples. Empty/None values when the latency monitor has no data.
+
+    Falls back to the last-known cellular interface (recorded by the ping
+    monitor) so a degraded heartbeat still carries the cellular path's recent
+    stats even though the live interface is momentarily None."""
+    from sim_monitor.core.latency import payload_stats
+
+    iface = interface or db.get_setting("cellular_interface")
+    now = time.time()
+    samples = (
+        db.icmp_samples_between(now - 86400, now, interface=iface)
+        if iface else []
+    )
+    return payload_stats(samples, now)
+
+
 class HttpMonitor:
     def __init__(
         self,
@@ -127,6 +146,7 @@ class HttpMonitor:
         context = snapshot.placeholder_context()
         context.update(collect_host_metrics())
         context.update(collect_interface_ips())
+        context.update(latency_placeholder_context(self.db, snapshot.interface))
         context["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         # URL + headers are string-templated; the body is either built from
         # structured fields (always-valid JSON) or string-templated for raw use.

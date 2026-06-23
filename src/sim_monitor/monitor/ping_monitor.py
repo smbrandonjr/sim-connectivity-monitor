@@ -110,6 +110,10 @@ class PingMonitor:
             return []
         jobs = [(iface, target) for iface in interfaces for target in config.targets]
         cell = self.store.get().interface
+        # Remember the cellular interface so heartbeat placeholders can still
+        # resolve its recent stats while momentarily disconnected (degraded).
+        if cell and self.db.get_setting("cellular_interface") != cell:
+            self.db.set_setting("cellular_interface", cell)
 
         def _one(job: tuple[str, str]) -> dict:
             iface, target = job

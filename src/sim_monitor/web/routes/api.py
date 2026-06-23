@@ -330,11 +330,15 @@ def command(name: str):
 def placeholders():
     """Current values of every heartbeat placeholder, for the payload builder's
     live preview (host metrics + sampled_at included)."""
+    from sim_monitor.monitor.http_monitor import latency_placeholder_context
     from sim_monitor.system.host import collect_host_metrics, collect_interface_ips
 
-    ctx = sim().store.get().placeholder_context()
+    app = sim()
+    snapshot = app.store.get()
+    ctx = snapshot.placeholder_context()
     ctx.update(collect_host_metrics())
     ctx.update(collect_interface_ips())
+    ctx.update(latency_placeholder_context(app.db, snapshot.interface))
     ctx["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     return jsonify(ctx)
 

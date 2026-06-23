@@ -246,6 +246,71 @@ class TestPingMonitor:
         db.close()
 
 
+class TestPayloadStats:
+    def _row(self, now, dt, target, recv, avg):
+        return {"ts": now - dt, "interface": "wwan0", "target": target,
+                "sent": 5, "received": recv, "loss_pct": round((1 - recv / 5) * 100, 1),
+                "rtt_avg_ms": avg, "rtt_min_ms": avg, "rtt_max_ms": avg}
+
+    def test_last_and_windows(self):
+        now = 1_000_000.0
+        rows = [
+            self._row(now, 30, "1.1.1.1", 5, 40.0),
+            self._row(now, 30, "8.8.8.8", 5, 50.0),       # last cycle: avg 45, loss 0
+            self._row(now, 2 * 3600, "1.1.1.1", 4, 80.0),  # 2h ago (in 3h/6h/24h, not 1h)
+            self._row(now, 2 * 3600, "8.8.8.8", 5, 80.0),
+        ]
+        s = agg.payload_stats(rows, now)
+        assert s["latency_ms"] == 45.0 and s["loss_pct"] == 0.0
+        assert s["latency_1h"] == 45.0 and s["loss_1h"] == 0.0  # only last cycle
+        assert s["loss_3h"] == 5.0                              # sent 20, recv 19
+        assert s["latency_3h"] == round(1170 / 19, 2)           # received-weighted
+        assert s["loss_24h"] == 5.0
+
+    def test_empty_is_all_none(self):
+        s = agg.payload_stats([], 1000.0)
+        assert s["latency_ms"] is None and s["loss_24h"] is None
+        assert set(s) == {
+            "latency_ms", "loss_pct", "latency_1h", "loss_1h", "latency_3h", "loss_3h",
+            "latency_6h", "loss_6h", "latency_24h", "loss_24h",
+        }
+
+
+class TestLatencyPlaceholderContext:
+    def test_reads_interface_samples(self):
+        import time as _t
+
+        from sim_monitor.monitor.http_monitor import latency_placeholder_context
+
+        db = Database(":memory:")
+        db.add_icmp_samples(_t.time() - 20, [
+            {"interface": "wwan0", "target": "1.1.1.1", "sent": 5, "received": 5,
+             "loss_pct": 0.0, "rtt_avg_ms": 42.0, "rtt_min_ms": 40.0, "rtt_max_ms": 44.0},
+        ])
+        ctx = latency_placeholder_context(db, "wwan0")
+        assert ctx["latency_ms"] == 42.0 and ctx["loss_pct"] == 0.0
+        assert ctx["latency_24h"] == 42.0
+        assert latency_placeholder_context(db, "eth0")["latency_ms"] is None
+        assert latency_placeholder_context(db, None)["latency_ms"] is None
+        db.close()
+
+    def test_falls_back_to_last_cellular_interface_when_degraded(self):
+        import time as _t
+
+        from sim_monitor.monitor.http_monitor import latency_placeholder_context
+
+        db = Database(":memory:")
+        db.set_setting("cellular_interface", "wwan0")  # recorded while connected
+        db.add_icmp_samples(_t.time() - 20, [
+            {"interface": "wwan0", "target": "1.1.1.1", "sent": 5, "received": 4,
+             "loss_pct": 20.0, "rtt_avg_ms": 55.0, "rtt_min_ms": 50.0, "rtt_max_ms": 60.0},
+        ])
+        # interface is None (degraded) but stats still resolve via the fallback.
+        ctx = latency_placeholder_context(db, None)
+        assert ctx["latency_ms"] == 55.0 and ctx["loss_pct"] == 20.0
+        db.close()
+
+
 def test_fake_pinger_is_plausible():
     import random
     p = make_fake_pinger(rng=random.Random(7))

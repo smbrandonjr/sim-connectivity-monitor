@@ -14,6 +14,9 @@ HOUR = 3600.0
 DAY = 86400.0
 _PERIOD_SECONDS = {"hour": HOUR, "day": DAY}
 
+# Trailing windows exposed as heartbeat placeholders, label -> seconds.
+PAYLOAD_WINDOWS = (("1h", 3600), ("3h", 10800), ("6h", 21600), ("24h", 86400))
+
 
 def period_seconds(period: str) -> float:
     return _PERIOD_SECONDS[period]
@@ -134,3 +137,37 @@ def summarize_latency(
         "series": series,
         "headline": headline,
     }
+
+
+def _window_stats(rows: list[dict]) -> tuple[float | None, float | None]:
+    """(avg latency ms, loss %) for a set of raw sample rows, or (None, None)
+    when there are no rows (unknown — not zero/100)."""
+    if not rows:
+        return None, None
+    agg = _aggregate(rows)
+    return agg["rtt_avg_ms"], agg["loss_pct"]
+
+
+def payload_stats(samples: Iterable[dict], now: float) -> dict:
+    """Heartbeat placeholders for one interface's latency/loss: the latest probe
+    cycle plus trailing 1h/3h/6h/24h windows. `samples` is that interface's raw
+    rows over the last 24h (across all targets). Always returns every key; a
+    value is None when its window has no data, so unknowns are simply omitted
+    from the payload. Keys: latency_ms/loss_pct (last) and
+    latency_<w>/loss_<w> for w in 1h/3h/6h/24h."""
+    out: dict[str, float | None] = {"latency_ms": None, "loss_pct": None}
+    for label, _ in PAYLOAD_WINDOWS:
+        out[f"latency_{label}"] = None
+        out[f"loss_{label}"] = None
+    rows = list(samples)
+    if not rows:
+        return out
+    last_ts = max(r["ts"] for r in rows)
+    out["latency_ms"], out["loss_pct"] = _window_stats(
+        [r for r in rows if r["ts"] == last_ts]
+    )
+    for label, win in PAYLOAD_WINDOWS:
+        out[f"latency_{label}"], out[f"loss_{label}"] = _window_stats(
+            [r for r in rows if r["ts"] >= now - win]
+        )
+    return out

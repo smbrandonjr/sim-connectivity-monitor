@@ -89,8 +89,19 @@
     { group: "meta", label: "mem_free_mb", path: "meta.mem_free_mb", value: "mem_free_mb" },
     { group: "meta", label: "temperature_c", path: "meta.temperature_c", value: "temperature_c" },
     { group: "meta", label: "sampled_at", path: "meta.sampled_at", value: "sampled_at" },
+    // Cellular-path latency/loss from the latency monitor (last cycle + windows).
+    { group: "latency", label: "latency last (ms)", path: "latency.last_ms", value: "latency_ms" },
+    { group: "latency", label: "loss last (%)", path: "latency.last_loss_pct", value: "loss_pct" },
+    { group: "latency", label: "latency 1h avg (ms)", path: "latency.avg_ms_1h", value: "latency_1h" },
+    { group: "latency", label: "loss 1h (%)", path: "latency.loss_pct_1h", value: "loss_1h" },
+    { group: "latency", label: "latency 3h avg (ms)", path: "latency.avg_ms_3h", value: "latency_3h" },
+    { group: "latency", label: "loss 3h (%)", path: "latency.loss_pct_3h", value: "loss_3h" },
+    { group: "latency", label: "latency 6h avg (ms)", path: "latency.avg_ms_6h", value: "latency_6h" },
+    { group: "latency", label: "loss 6h (%)", path: "latency.loss_pct_6h", value: "loss_6h" },
+    { group: "latency", label: "latency 24h avg (ms)", path: "latency.avg_ms_24h", value: "latency_24h" },
+    { group: "latency", label: "loss 24h (%)", path: "latency.loss_pct_24h", value: "loss_24h" },
   ];
-  const GROUPS = ["Top level", "signal", "meta"];
+  const GROUPS = ["Top level", "signal", "meta", "latency"];
   const RECOMMENDED = ["iccid", "status", "signal.rssi_dbm", "signal.rsrp_dbm", "signal.sinr_db",
     "signal.band", "meta.imei", "meta.fw", "meta.ip", "meta.sampled_at"];
 
