@@ -232,6 +232,32 @@ class TestLatencyConfig:
         assert resp.status_code == 400
 
 
+class TestSmsAutoReplyConfig:
+    def test_get_returns_disabled_default(self, sim, client):
+        data = client.get("/api/sms-autoreply.json").get_json()
+        assert data["enabled"] is False and data["rules"] == []
+
+    def test_put_persists_and_roundtrips(self, sim, client):
+        body = {"enabled": True, "rules": [
+            {"name": "status", "match": "contains", "pattern": "status", "reply": "ok"},
+        ]}
+        resp = client.put("/api/sms-autoreply", json=body)
+        assert resp.status_code == 200 and resp.get_json()["ok"] is True
+        got = client.get("/api/sms-autoreply.json").get_json()
+        assert got["enabled"] is True
+        assert got["rules"][0]["pattern"] == "status" and got["rules"][0]["reply"] == "ok"
+
+    def test_put_invalid_regex_400(self, sim, client):
+        body = {"enabled": True, "rules": [
+            {"match": "regex", "pattern": "[bad", "reply": "x"},
+        ]}
+        assert client.put("/api/sms-autoreply", json=body).status_code == 400
+
+    def test_put_blank_reply_400(self, sim, client):
+        body = {"enabled": True, "rules": [{"pattern": "hi", "reply": ""}]}
+        assert client.put("/api/sms-autoreply", json=body).status_code == 400
+
+
 class TestTelemetryJson:
     def test_telemetry(self, sim, client):
         tick_until_connected(sim)

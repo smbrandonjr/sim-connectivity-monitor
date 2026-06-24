@@ -440,6 +440,50 @@ class TestSmsFlow:
         rows = harness.db.recent_sms()
         assert any(r["direction"] == "out" and r["body"] == "ping" for r in rows)
 
+    def test_auto_reply_fires_on_match(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.db.set_setting("sms_auto_reply", {
+            "enabled": True,
+            "rules": [{"match": "contains", "pattern": "status", "reply": "all good"}],
+        })
+        harness.driver.receive_sms("+12025550123", "what's your STATUS?")
+        harness.tick()  # fetch inbound -> auto-reply
+        assert harness.driver.sent_log == [("+12025550123", "all good")]
+        rows = harness.db.recent_sms()
+        assert any(r["direction"] == "out" and r["body"] == "all good" for r in rows)
+
+    def test_auto_reply_no_match_stays_silent(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.db.set_setting("sms_auto_reply", {
+            "enabled": True,
+            "rules": [{"match": "exact", "pattern": "ping", "reply": "pong"}],
+        })
+        harness.driver.receive_sms("+1", "hello there")
+        harness.tick()
+        assert harness.driver.sent_log == []
+
+    def test_auto_reply_disabled_does_nothing(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.db.set_setting("sms_auto_reply", {
+            "enabled": False,
+            "rules": [{"match": "contains", "pattern": "x", "reply": "y"}],
+        })
+        harness.driver.receive_sms("+1", "x marks the spot")
+        harness.tick()
+        assert harness.driver.sent_log == []
+
+    def test_auto_reply_loop_guard_caps_per_peer(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.db.set_setting("sms_auto_reply", {
+            "enabled": True,
+            "rules": [{"match": "contains", "pattern": "hi", "reply": "yo"}],
+        })
+        # Same peer keeps pinging; replies are capped at AUTO_REPLY_MAX_PER_PEER.
+        for i in range(harness.daemon.AUTO_REPLY_MAX_PER_PEER + 3):
+            harness.driver.receive_sms("+15550000000", f"hi {i}")
+            harness.tick()
+        assert len(harness.driver.sent_log) == harness.daemon.AUTO_REPLY_MAX_PER_PEER
+
     def test_delete_inbound_sms(self, harness):
         harness.run_until(State.CONNECTED)
         harness.driver.receive_sms("+1", "x")

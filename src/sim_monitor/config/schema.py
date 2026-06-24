@@ -185,6 +185,43 @@ class LatencyConfig(StrictModel):
         return colors
 
 
+SmsMatchType = Literal["contains", "exact", "prefix", "regex"]
+
+
+class SmsReplyRule(StrictModel):
+    """One auto-reply rule: when an inbound SMS body matches `pattern` (by the
+    chosen `match` mode), the daemon sends `reply` back to the sender.
+
+    Matching is case-insensitive by default. The pure decision lives in
+    sim_monitor.core.sms_reply.find_reply()."""
+
+    name: str = ""  # optional human label, shown in the UI / event log
+    enabled: bool = True
+    match: SmsMatchType = "contains"
+    pattern: str = Field(min_length=1)
+    case_sensitive: bool = False
+    reply: str = Field(min_length=1, max_length=1600)  # ~10 SMS parts
+
+    @model_validator(mode="after")
+    def _valid_regex(self) -> SmsReplyRule:
+        if self.match == "regex":
+            try:
+                re.compile(self.pattern)
+            except re.error as e:
+                raise ValueError(f"invalid regex {self.pattern!r}: {e}") from e
+        return self
+
+
+class SmsAutoReplyConfig(StrictModel):
+    """Device-level SMS auto-responder: a list of pattern->reply rules tried in
+    order (first match wins). Global, not per-profile. UI-managed (stored in the
+    device DB under the 'sms_auto_reply' setting), so it can carry user message
+    content and never needs to be committed."""
+
+    enabled: bool = False
+    rules: list[SmsReplyRule] = Field(default_factory=list)
+
+
 def _validate_context_set(contexts: list[PdpContext], label: str) -> None:
     """Each context set must have unique CIDs and exactly one bearer (a single
     context is auto-promoted). Mutates `contexts` to set the implicit bearer."""

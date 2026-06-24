@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from sim_monitor import __version__
 from sim_monitor.config import loader
-from sim_monitor.config.schema import MonitorConfig, Profile
+from sim_monitor.config.schema import MonitorConfig, Profile, SmsAutoReplyConfig
 from sim_monitor.core import commands as cmd
 from sim_monitor.core.diagnostics import build_bundle, build_timeline
 from sim_monitor.web.routes._helpers import sim
@@ -387,6 +387,31 @@ def latency_config_put():
         "latency",
         f"latency monitor config updated (enabled={config.enabled}, "
         f"interval={config.interval_seconds}s)",
+    )
+    return jsonify({"ok": True})
+
+
+@bp.get("/sms-autoreply.json")
+def sms_autoreply_get():
+    """The UI-managed SMS auto-reply rules (device DB; never committed). Returns
+    the saved config, or an empty disabled default when none is set yet."""
+    raw = sim().db.get_setting("sms_auto_reply")
+    return jsonify(raw or SmsAutoReplyConfig().model_dump(mode="json"))
+
+
+@bp.put("/sms-autoreply")
+def sms_autoreply_put():
+    body = _body()
+    try:
+        config = SmsAutoReplyConfig.model_validate(body)
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    app = sim()
+    app.db.set_setting("sms_auto_reply", config.model_dump(mode="json"))
+    app.events.info(
+        "sms",
+        f"auto-reply config updated (enabled={config.enabled}, "
+        f"{len(config.rules)} rule(s))",
     )
     return jsonify({"ok": True})
 

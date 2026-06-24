@@ -9,6 +9,55 @@
   let number = "";
   let text = "";
 
+  // ── auto-reply rules ──────────────────────────────────────────────────────
+  type Rule = {
+    name: string;
+    enabled: boolean;
+    match: "contains" | "exact" | "prefix" | "regex";
+    pattern: string;
+    case_sensitive: boolean;
+    reply: string;
+  };
+  let showRules = false;
+  let savingRules = false;
+  let autoEnabled = false;
+  let rules: Rule[] = [];
+
+  const blankRule = (): Rule => ({
+    name: "", enabled: true, match: "contains",
+    pattern: "", case_sensitive: false, reply: "",
+  });
+
+  async function loadRules() {
+    try {
+      const c = await api.smsAutoReply();
+      autoEnabled = !!c.enabled;
+      rules = (c.rules ?? []).map((r: any) => ({ ...blankRule(), ...r }));
+    } catch {
+      /* keep defaults */
+    }
+  }
+
+  function addRule() {
+    rules = [...rules, blankRule()];
+    showRules = true;
+  }
+  function removeRule(i: number) {
+    rules = rules.filter((_, idx) => idx !== i);
+  }
+
+  async function saveRules() {
+    // Drop blank rows so an empty editor row can't fail validation.
+    const clean = rules.filter((r) => r.pattern.trim() && r.reply.trim());
+    savingRules = true;
+    const ok = await api.saveSmsAutoReply({ enabled: autoEnabled, rules: clean });
+    savingRules = false;
+    if (ok) {
+      rules = clean.map((r) => ({ ...r }));
+      toast("Auto-reply rules saved", "ok");
+    }
+  }
+
   async function load() {
     messages = await api.sms();
   }
@@ -48,6 +97,7 @@
 
   onMount(() => {
     load();
+    loadRules();
     api.cmd("mark-sms-read");  // viewing the inbox clears the unread badge
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
@@ -67,6 +117,64 @@
     <input class="ui-input" style="flex:1;min-width:240px" placeholder="Message text" bind:value={text} />
     <button class="ui-btn ui-btn-primary" on:click={send}>Send</button>
   </div>
+</section>
+
+<section class="ui-card">
+  <div class="row">
+    <h2 style="flex:1">Auto-reply</h2>
+    <label class="toggle">
+      <input type="checkbox" bind:checked={autoEnabled} /> <span>Enabled</span>
+    </label>
+    <button class="ui-btn ui-btn-sm" class:on={showRules} on:click={() => (showRules = !showRules)}>
+      {showRules ? "Hide" : "Show"} rules ({rules.length})
+    </button>
+  </div>
+  <p class="muted hint">
+    When an inbound SMS matches a rule, the device automatically texts the sender back.
+    Rules are tried top-to-bottom; the first match wins.
+  </p>
+
+  {#if showRules}
+    <div class="rules">
+      {#each rules as r, i (i)}
+        <div class="rule" class:off={!r.enabled}>
+          <div class="rline">
+            <label class="toggle sm" title="enable this rule">
+              <input type="checkbox" bind:checked={r.enabled} />
+            </label>
+            <input class="ui-input name" placeholder="label (optional)" bind:value={r.name} />
+            <select class="ui-input match" bind:value={r.match}>
+              <option value="contains">contains</option>
+              <option value="exact">exact</option>
+              <option value="prefix">starts with</option>
+              <option value="regex">regex</option>
+            </select>
+            <label class="toggle sm" title="case sensitive">
+              <input type="checkbox" bind:checked={r.case_sensitive} /> <span>Aa</span>
+            </label>
+            <button class="ui-btn ui-btn-sm ui-btn-danger" title="remove rule"
+              on:click={() => removeRule(i)}><i class="ri-delete-bin-line"></i></button>
+          </div>
+          <div class="rline">
+            <input class="ui-input pat" placeholder="pattern to match in the message" bind:value={r.pattern} />
+          </div>
+          <div class="rline">
+            <textarea class="ui-input rep" rows="2" placeholder="reply to send back" bind:value={r.reply}></textarea>
+          </div>
+        </div>
+      {:else}
+        <p class="muted">No rules yet. Add one to start auto-replying.</p>
+      {/each}
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <button class="ui-btn ui-btn-sm" on:click={addRule}><i class="ri-add-line"></i> Add rule</button>
+      <span style="flex:1"></span>
+      <button class="ui-btn ui-btn-primary ui-btn-sm" on:click={saveRules} disabled={savingRules}>
+        {savingRules ? "Saving…" : "Save auto-reply"}
+      </button>
+    </div>
+  {/if}
 </section>
 
 <table>
@@ -94,3 +202,24 @@
   </tbody>
 </table>
 <p class="muted">Binary/OTA (class-2) messages are shown as hex; multi-part messages are reassembled.</p>
+
+<style>
+  .hint { font-size: var(--fs-xs, 11px); margin: 2px 0 0; }
+  .toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: var(--fs-sm, 13px); color: var(--color-text); white-space: nowrap;
+  }
+  .toggle.sm { gap: 4px; font-size: var(--fs-xs, 11px); color: var(--color-text-muted); }
+  .rules { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .rule {
+    border: 1px solid var(--color-border, #333); border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 6px;
+    background: var(--color-surface-2, rgba(127,127,127,.05));
+  }
+  .rule.off { opacity: 0.55; }
+  .rline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .rule .name { flex: 1; min-width: 120px; }
+  .rule .match { width: 110px; flex: none; }
+  .rule .pat { flex: 1; font-family: var(--font-mono, monospace); }
+  .rule .rep { flex: 1; width: 100%; resize: vertical; }
+</style>

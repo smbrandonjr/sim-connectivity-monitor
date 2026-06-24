@@ -244,10 +244,11 @@ class Database:
         return [dict(r) for r in rows]
 
     # ── SMS ──────────────────────────────────────────────────────────────
-    def upsert_inbound_sms(self, rows: list[dict[str, Any]]) -> int:
+    def upsert_inbound_sms(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Sync the inbound set to the modem's current contents, preserving our
         app-managed read state across refreshes (keyed by a stable `dedup`).
-        New messages are inserted as 'unread'. Returns the count of NEW messages."""
+        New messages are inserted as 'unread'. Returns the list of NEW message
+        rows (in arrival order) so callers can act on them (e.g. auto-reply)."""
         with self._lock:
             current = [r["dedup"] for r in rows]
             if current:
@@ -259,7 +260,7 @@ class Database:
                 )
             else:
                 self._conn.execute("DELETE FROM sms WHERE direction='in'")
-            new_count = 0
+            new_rows: list[dict[str, Any]] = []
             for r in rows:
                 existing = self._conn.execute(
                     "SELECT id FROM sms WHERE direction='in' AND dedup=?", (r["dedup"],)
@@ -270,7 +271,7 @@ class Database:
                         (json.dumps(r["modem_indices"]), r.get("parts", 1), existing["id"]),
                     )
                 else:
-                    new_count += 1
+                    new_rows.append(r)
                     self._conn.execute(
                         "INSERT INTO sms (ts, direction, peer, body, encoding, status,"
                         " modem_indices, parts, raw_pdu, dedup)"
@@ -282,7 +283,7 @@ class Database:
                         ),
                     )
             self._conn.commit()
-        return new_count
+        return new_rows
 
     def mark_inbound_read(self) -> None:
         with self._lock:

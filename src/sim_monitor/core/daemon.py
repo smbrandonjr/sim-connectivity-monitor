@@ -15,10 +15,16 @@ from dataclasses import replace
 
 from sim_monitor.config.loader import load_profiles
 from sim_monitor.config.matcher import match_profile
-from sim_monitor.config.schema import AppConfig, MonitorConfig, Profile
+from sim_monitor.config.schema import (
+    AppConfig,
+    MonitorConfig,
+    Profile,
+    SmsAutoReplyConfig,
+)
 from sim_monitor.core import commands as cmd
 from sim_monitor.core.commands import CommandQueue
 from sim_monitor.core.events import EventLog
+from sim_monitor.core.sms_reply import find_reply
 from sim_monitor.core.state_store import (
     DiagnosticEntry,
     DiagnosticsReport,
@@ -110,6 +116,7 @@ class Daemon:
         self._next_routing_assert = 0.0     # throttle routing re-assertion
         self._routing_warned = False        # logged the current drift episode?
         self._next_sms_poll = 0.0           # monotonic time of next SMS backstop poll
+        self._auto_reply_times: dict[str, list[float]] = {}  # peer -> recent reply times
         self._next_sim_reprobe = 0.0        # when to next nudge a SIM re-read
         self._ppp_reset_attempts = 0        # bounded modem resets to escape a PPP link
         self._next_port_scan = 0.0          # throttle serial-port scans while NO_MODEM
@@ -371,6 +378,10 @@ class Daemon:
     _SMS_SAFE_STATES = (S.CONNECTED, S.MODEM_FOUND, S.SIM_READY, S.DEGRADED)
     SMS_POLL_SECONDS = 60       # backstop poll in case the +CMTI URC isn't captured
     SIM_REPROBE_SECONDS = 60    # how often to nudge a SIM re-read while none present
+    # Loop guard: cap how many auto-replies a single peer can trigger in a
+    # rolling window, so two auto-responders can't ping-pong forever.
+    AUTO_REPLY_WINDOW_SECONDS = 3600
+    AUTO_REPLY_MAX_PER_PEER = 5
 
     def _maybe_fetch_sms(self) -> None:
         if self.driver is None or self.state not in self._SMS_SAFE_STATES:
@@ -392,10 +403,11 @@ class Daemon:
             return
         from sim_monitor.modem.sms import reassemble_inbound
 
-        new_count = self.db.upsert_inbound_sms(reassemble_inbound(raw))
+        new_rows = self.db.upsert_inbound_sms(reassemble_inbound(raw))
         self.store.update(sms_unread=self.db.count_unread_sms())
-        if new_count:
-            self.events.info("sms", f"{new_count} new message(s) received")
+        if new_rows:
+            self.events.info("sms", f"{len(new_rows)} new message(s) received")
+            self._auto_reply(new_rows)
 
     def _send_sms(self, number: str, text: str) -> None:
         if self.driver is None:
@@ -408,6 +420,51 @@ class Daemon:
             return
         self.db.add_sent_sms(number, text, parts=parts)
         self.events.info("sms", f"sent {parts}-part message to {number}")
+
+    def _auto_reply(self, new_rows: list[dict]) -> None:
+        """For each genuinely-new inbound message, send the first matching
+        auto-reply rule's response. Config is read fresh from the DB so UI edits
+        take effect immediately; a per-peer rate cap prevents reply loops."""
+        raw = self.db.get_setting("sms_auto_reply")
+        if not raw:
+            return
+        try:
+            config = SmsAutoReplyConfig.model_validate(raw)
+        except Exception as e:  # noqa: BLE001 - bad stored config must not wedge SMS
+            log.warning("invalid stored sms auto-reply config: %s", e)
+            return
+        if not config.enabled or not config.rules:
+            return
+        for row in new_rows:
+            peer = (row.get("peer") or "").strip()
+            if not peer:
+                continue
+            rule = find_reply(config, row.get("body") or "")
+            if rule is None:
+                continue
+            if not self._auto_reply_allowed(peer):
+                self.events.warning(
+                    "sms",
+                    f"auto-reply to {peer} suppressed (over "
+                    f"{self.AUTO_REPLY_MAX_PER_PEER}/hr loop guard)",
+                )
+                continue
+            label = rule.name or rule.pattern
+            self.events.info("sms", f"auto-reply rule {label!r} matched SMS from {peer}")
+            self._send_sms(peer, rule.reply)
+
+    def _auto_reply_allowed(self, peer: str) -> bool:
+        """Rate-limit auto-replies per peer (rolling window). Records the send
+        when allowed."""
+        now = self.clock()
+        cutoff = now - self.AUTO_REPLY_WINDOW_SECONDS
+        recent = [t for t in self._auto_reply_times.get(peer, []) if t >= cutoff]
+        if len(recent) >= self.AUTO_REPLY_MAX_PER_PEER:
+            self._auto_reply_times[peer] = recent
+            return False
+        recent.append(now)
+        self._auto_reply_times[peer] = recent
+        return True
 
     def _delete_sms(self, row_id: int) -> None:
         row = self.db.get_sms(row_id)
