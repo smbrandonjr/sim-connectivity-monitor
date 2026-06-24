@@ -20,6 +20,36 @@ class TestDecode7bit:
         assert sms.timestamp.startswith("2099-11-12")  # yy=99 from this fixture
 
 
+class TestTimestampEpoch:
+    def _deliver(self, scts_hex: str) -> str:
+        # Minimal SMS-DELIVER, empty GSM7 body, with the given 7-octet SCTS.
+        return "0004" + "0181F0" + "00" + "00" + scts_hex + "00"
+
+    def test_tz_offset_resolves_to_utc(self):
+        import calendar
+
+        # SCTS wall time 2026-06-24 22:42:46 at +2h (8 quarter-hours).
+        # Transmitted octets are semi-octet swapped; tz "+08" -> octet "80".
+        sms = decode_pdu(self._deliver("62604222246480"))
+        assert sms.timestamp == "2026-06-24 22:42:46"  # SMSC local wall time
+        # The true instant is two hours earlier in UTC.
+        assert sms.timestamp_epoch == calendar.timegm((2026, 6, 24, 20, 42, 46, 0, 0, 0))
+
+    def test_negative_tz_offset(self):
+        import calendar
+
+        # Same wall time at -5h (Eastern, 20 quarter-hours). After the semi-octet
+        # swap the tz reads "A0" (sign bit 0x80 set, value 20), so the octet is
+        # transmitted as "0A".
+        sms = decode_pdu(self._deliver("6260422224640A"))
+        assert sms.timestamp == "2026-06-24 22:42:46"
+        assert sms.timestamp_epoch == calendar.timegm((2026, 6, 25, 3, 42, 46, 0, 0, 0))
+
+    def test_zeroed_scts_has_no_epoch(self):
+        sms = decode_pdu(self._deliver("00000000000000"))
+        assert sms.timestamp_epoch is None
+
+
 class TestDecodeUcs2:
     def test_unicode(self):
         # DCS 0x08 UCS2, text "Hi😀" would need surrogate; use a BMP example "Héllo".

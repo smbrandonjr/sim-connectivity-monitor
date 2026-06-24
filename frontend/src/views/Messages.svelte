@@ -98,8 +98,16 @@
   onMount(() => {
     load();
     loadRules();
+    api.cmd("refresh-sms");    // pull straight from the modem when the page opens
     api.cmd("mark-sms-read");  // viewing the inbox clears the unread badge
-    const t = setInterval(load, 5000);
+    // Read the (DB-backed) inbox every 5s; force a fresh modem pull every ~15s
+    // while the page is open so new messages surface without a manual refresh.
+    let n = 0;
+    const t = setInterval(() => {
+      n += 1;
+      if (n % 3 === 0) api.cmd("refresh-sms");
+      load();
+    }, 5000);
     return () => clearInterval(t);
   });
 </script>

@@ -376,7 +376,7 @@ class Daemon:
     # ------------------------------------------------------------------ SMS
 
     _SMS_SAFE_STATES = (S.CONNECTED, S.MODEM_FOUND, S.SIM_READY, S.DEGRADED)
-    SMS_POLL_SECONDS = 60       # backstop poll in case the +CMTI URC isn't captured
+    SMS_POLL_SECONDS = 15       # backstop poll in case the +CMTI URC isn't captured
     SIM_REPROBE_SECONDS = 60    # how often to nudge a SIM re-read while none present
     # Loop guard: cap how many auto-replies a single peer can trigger in a
     # rolling window, so two auto-responders can't ping-pong forever.

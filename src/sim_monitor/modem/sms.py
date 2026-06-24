@@ -46,7 +46,9 @@ def reassemble_inbound(raw_list: list[RawSms]) -> list[dict]:
 
 
 def _row(indices: list[int], status: int, decoded: pdu.DecodedSms, body: str, parts: int) -> dict:
-    ts = _ts_to_epoch(decoded.timestamp)
+    # The PDU's SCTS is tz-corrected to a true UTC epoch in the codec; fall back
+    # to "now" only when the stamp is missing/invalid (e.g. a zeroed test PDU).
+    ts = decoded.timestamp_epoch if decoded.timestamp_epoch is not None else time.time()
     # Stable identity so read-state survives the modem's index reuse / refresh.
     dedup = hashlib.sha1(
         f"{decoded.sender}|{int(ts)}|{body}".encode(errors="replace")
@@ -62,10 +64,3 @@ def _row(indices: list[int], status: int, decoded: pdu.DecodedSms, body: str, pa
         "raw_pdu": None,
         "dedup": dedup,
     }
-
-
-def _ts_to_epoch(scts: str) -> float:
-    try:
-        return time.mktime(time.strptime(scts, "%Y-%m-%d %H:%M:%S"))
-    except (ValueError, OverflowError):
-        return time.time()

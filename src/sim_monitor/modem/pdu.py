@@ -12,6 +12,7 @@ which matters for understanding carrier/OTA traffic.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
 
 # GSM 03.38 default alphabet (basic table); index 0x1B is the escape to the
@@ -44,7 +45,8 @@ class Concat:
 @dataclass(frozen=True)
 class DecodedSms:
     sender: str
-    timestamp: str          # ISO-ish "YYYY-MM-DD HH:MM:SS" (+tz omitted)
+    timestamp: str          # SMSC local wall time "YYYY-MM-DD HH:MM:SS" (display)
+    timestamp_epoch: float | None  # true UTC epoch (tz-corrected); None if invalid
     text: str               # decoded text; for 8-bit binary, hex string
     encoding: str           # "gsm7" | "ucs2" | "8bit"
     concat: Concat | None    # set when part of a multi-part message
@@ -76,10 +78,29 @@ def _decode_address(octets: bytes, length_digits: int) -> str:
     return prefix + digits
 
 
-def _decode_scts(octets: bytes) -> str:
+def _decode_scts(octets: bytes) -> tuple[str, float | None]:
+    """Decode the 7-octet TP-SCTS. Returns (display string in the SMSC's local
+    wall time, true UTC epoch). The 7th octet is the timezone offset in
+    quarter-hours (high bit of its first semi-octet = sign), so we can resolve
+    the wall time to a real instant. Epoch is None for an invalid/zero stamp."""
     d = _swap_semi_octets(octets[:7].hex())
     yy, mm, dd, hh, mi, ss = (d[0:2], d[2:4], d[4:6], d[6:8], d[8:10], d[10:12])
-    return f"20{yy}-{mm}-{dd} {hh}:{mi}:{ss}"
+    display = f"20{yy}-{mm}-{dd} {hh}:{mi}:{ss}"
+
+    epoch: float | None = None
+    try:
+        # Timezone: BCD quarter-hours; bit 0x8 of the first swapped nibble = sign.
+        tz_raw = int(d[12:14], 16)
+        sign = -1 if (tz_raw & 0x80) else 1
+        quarters = (tz_raw >> 4 & 0x07) * 10 + (tz_raw & 0x0F)
+        offset_seconds = sign * quarters * 15 * 60
+        fields = (2000 + int(yy), int(mm), int(dd), int(hh), int(mi), int(ss))
+        # timegm() treats the wall-clock fields as UTC; subtract the local
+        # offset to get the true UTC instant (UTC = local - offset).
+        epoch = calendar.timegm((*fields, 0, 0, 0)) - offset_seconds
+    except (ValueError, OverflowError):
+        epoch = None
+    return display, epoch
 
 
 def _unpack_gsm7(data: bytes, septet_count: int, skip_bits: int = 0) -> str:
@@ -173,7 +194,7 @@ def decode_pdu(pdu_hex: str) -> DecodedSms:
     idx = idx + 2 + oa_octets
     idx += 1  # TP-PID
     dcs = b[idx]
-    scts = _decode_scts(b[idx + 1:idx + 8])
+    scts, scts_epoch = _decode_scts(b[idx + 1:idx + 8])
     udl = b[idx + 8]
     ud = b[idx + 9:]
 
@@ -195,7 +216,7 @@ def decode_pdu(pdu_hex: str) -> DecodedSms:
         septet_count = udl - (udh_len * 8 + fill_bits) // 7
         text = _unpack_gsm7(ud, septet_count, skip_bits=udh_len * 8 + fill_bits)
         encoding = "gsm7"
-    return DecodedSms(sender, scts, text, encoding, concat)
+    return DecodedSms(sender, scts, scts_epoch, text, encoding, concat)
 
 
 # ── encode ──────────────────────────────────────────────────────────────────
