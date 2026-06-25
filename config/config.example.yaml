@@ -22,10 +22,14 @@ daemon:
   reset_on_ppp_interface: true
   ppp_reset_max_attempts: 2
 
-# Per-interface latency + packet-loss monitor. Pings each up interface
+# Per-interface latency + packet-loss monitor. Probes each up interface
 # (cellular + any wifi/ethernet) against the targets every interval, so the
 # Latency tab can show whether a problem is cellular-only or systemic. Raw
 # samples roll up into hourly/daily aggregates for ~30-day review.
+#
+# Targets are mixed: a bare IP/host is pinged (ICMP); an http(s):// URL is
+# fetched once per cycle (bound to each interface) and timed, counting a
+# response status < 400 as a success. Both kinds share the same charts.
 #
 # This block is the boot/default. Once you save settings from the Latency tab
 # they're stored in the device DB and OVERRIDE this block (and hot-reload on the
@@ -33,14 +37,16 @@ daemon:
 latency:
   enabled: false             # set true to start probing
   interval_seconds: 60       # raise to throttle (e.g. 300 = every 5 min)
-  targets:                   # major public DNS anycast IPs
+  targets:                   # public DNS anycast IPs + an HTTP reachability check
     - 1.1.1.1
     - 1.0.0.1
     - 8.8.8.8
     - 8.8.4.4
     - 9.9.9.9
-  packet_count: 5            # pings per target per cycle (loss granularity)
-  timeout_seconds: 2
+    - https://google.com/generate_204
+  packet_count: 5            # pings per ICMP target per cycle (loss granularity)
+  timeout_seconds: 2         # per-ping timeout (ICMP)
+  http_timeout_seconds: 10   # per-request timeout (HTTP URL targets)
   interfaces: []             # [] = auto-enumerate every up interface each cycle
   exclude_interfaces: []     # names to skip (e.g. a busy management bridge)
   raw_retention_days: 7      # keep per-cycle samples this long

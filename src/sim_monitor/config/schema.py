@@ -160,12 +160,16 @@ class LatencyConfig(StrictModel):
 
     enabled: bool = False
     interval_seconds: int = Field(default=60, ge=10)  # lower = denser, raise to throttle
+    # Probe targets. A bare IP/hostname is pinged (ICMP); an http(s):// URL is
+    # fetched (one request per cycle, bound to each interface) and timed, with a
+    # response status < 400 counted as a success. Both kinds share the charts.
     targets: list[str] = Field(
         default=["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9"],
         min_length=1,
     )
-    packet_count: int = Field(default=5, ge=1, le=20)  # pings per target per cycle
-    timeout_seconds: int = Field(default=2, ge=1, le=30)
+    packet_count: int = Field(default=5, ge=1, le=20)  # pings per ICMP target per cycle
+    timeout_seconds: int = Field(default=2, ge=1, le=30)  # per-ping timeout (ICMP)
+    http_timeout_seconds: int = Field(default=10, ge=1, le=60)  # request timeout (HTTP)
     # Interfaces to probe. Empty = auto-enumerate every up interface each cycle.
     interfaces: list[str] = Field(default_factory=list)
     exclude_interfaces: list[str] = Field(default_factory=list)

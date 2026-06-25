@@ -189,11 +189,17 @@ the monitor is sending right now.
 
 ## 8. Latency & packet-loss monitoring
 
-The **Latency** tab runs an independent ICMP monitor that pings a set of targets
-(public DNS anycast IPs by default) from *every* up interface — cellular plus any
-ethernet/Wi-Fi — each cycle. Pinging from all interfaces side-by-side makes it obvious
-whether a problem is cellular-only or systemic. Raw per-cycle samples are kept short-term
-and folded into hourly/daily rollups for long-term history.
+The **Latency** tab runs an independent monitor that probes a set of targets from
+*every* up interface — cellular plus any ethernet/Wi-Fi — each cycle. Probing from all
+interfaces side-by-side makes it obvious whether a problem is cellular-only or systemic.
+Raw per-cycle samples are kept short-term and folded into hourly/daily rollups for
+long-term history.
+
+Targets are mixed and auto-routed by what you type: a **bare IP/host** is pinged (ICMP),
+while an **`http(s)://` URL** (e.g. `https://google.com/generate_204`) is fetched once per
+cycle — bound to each interface and timed, with a response status `< 400` counted as a
+success. HTTP checks prove real end-to-end web reachability even when a carrier blocks or
+deprioritizes ICMP. Both kinds share the same charts, summary table, and CSV export.
 
 It's **off by default** — open the tab's settings (gear icon), tick **Enabled**, and
 optionally adjust targets, interval, pings-per-target, retention, and per-interface

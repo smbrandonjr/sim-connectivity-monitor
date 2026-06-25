@@ -22,7 +22,7 @@ from sim_monitor.config.schema import LatencyConfig
 from sim_monitor.core import latency as agg
 from sim_monitor.core.events import EventLog
 from sim_monitor.core.state_store import StateStore
-from sim_monitor.scan.engine import ping_host
+from sim_monitor.scan.engine import http_probe, ping_host
 from sim_monitor.storage.db import Database
 from sim_monitor.system.netifaces import list_up_interfaces
 
@@ -30,6 +30,11 @@ log = logging.getLogger(__name__)
 
 _MAX_WORKERS = 8
 _ROLLUP_PERIODS = ("hour", "day")
+
+
+def is_http_target(target: str) -> bool:
+    """A target probed over HTTP (vs ICMP ping) — an http(s):// URL."""
+    return target.strip().lower().startswith(("http://", "https://"))
 
 
 def effective_latency_config(db: Database, default: LatencyConfig) -> LatencyConfig:
@@ -55,6 +60,7 @@ class PingMonitor:
         get_config: Callable[[], LatencyConfig | None],
         trigger: threading.Event | None = None,
         pinger: Callable[..., dict] = ping_host,
+        http_prober: Callable[..., dict] = http_probe,
         list_interfaces: Callable[[], list[str]] = list_up_interfaces,
         monotonic: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
@@ -65,6 +71,7 @@ class PingMonitor:
         self.get_config = get_config
         self.trigger = trigger or threading.Event()
         self.pinger = pinger
+        self.http_prober = http_prober
         self.list_interfaces = list_interfaces
         self._monotonic = monotonic
         self._wall_clock = wall_clock
@@ -117,6 +124,8 @@ class PingMonitor:
 
         def _one(job: tuple[str, str]) -> dict:
             iface, target = job
+            if is_http_target(target):
+                return self._probe_http(iface, target, config)
             res = self.pinger(
                 target, interface=iface,
                 count=config.packet_count, timeout=config.timeout_seconds,
@@ -150,6 +159,24 @@ class PingMonitor:
         self._fold_rollups(ts)
         self._prune(config, ts)
         return rows
+
+    def _probe_http(self, iface: str, target: str, config: LatencyConfig) -> dict:
+        """One HTTP probe, mapped onto the same shape as a ping cycle: a single
+        request whose success (status < 400) counts as 1/1 received and whose
+        round-trip time becomes the RTT. A failure is 100% loss with no RTT, so
+        it folds into the existing charts/rollups exactly like a ping does."""
+        res = self.http_prober(
+            target, interface=iface, timeout=config.http_timeout_seconds
+        )
+        status = res.get("status")
+        ok = bool(res.get("ok")) and status is not None and status < 400
+        latency = res.get("latency_ms") if ok else None
+        return {
+            "interface": iface, "target": target,
+            "sent": 1, "received": 1 if ok else 0,
+            "loss_pct": 0.0 if ok else 100.0,
+            "rtt_avg_ms": latency, "rtt_min_ms": latency, "rtt_max_ms": latency,
+        }
 
     def _fold_rollups(self, now: float) -> None:
         for period in _ROLLUP_PERIODS:
@@ -207,3 +234,28 @@ def make_fake_pinger(rng=None) -> Callable[..., dict]:
         }
 
     return fake_ping
+
+
+# Plausible HTTP latencies (ms) — a touch higher than ICMP (TLS + request).
+_FAKE_HTTP_BASELINES = {"wwan0": 180.0, "eth0": 35.0, "wlan0": 70.0}
+
+
+def make_fake_http_prober(rng=None) -> Callable[..., dict]:
+    """An `http_probe`-shaped callable for simulate mode, so http(s):// targets
+    can be exercised on a dev box with no real network."""
+    import random
+
+    rand = rng or random.Random()
+
+    def fake_http(url: str, interface: str | None = None,
+                  timeout: float = 10) -> dict:
+        base = _FAKE_HTTP_BASELINES.get(interface or "", 90.0)
+        jitter = base * (0.3 if interface == "wwan0" else 0.15)
+        fail_chance = 0.05 if interface == "wwan0" else 0.01
+        if rand.random() < fail_chance:
+            return {"ok": False, "status": None,
+                    "latency_ms": round(timeout * 1000), "error": "timeout"}
+        return {"ok": True, "status": 204,
+                "latency_ms": round(max(1.0, rand.gauss(base, jitter)))}
+
+    return fake_http

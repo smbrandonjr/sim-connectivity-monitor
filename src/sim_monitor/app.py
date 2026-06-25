@@ -83,6 +83,7 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
         SIMULATE_INTERFACES,
         PingMonitor,
         effective_latency_config,
+        make_fake_http_prober,
         make_fake_pinger,
     )
     from sim_monitor.web import server
@@ -111,6 +112,7 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
     if config.simulate:
         ping_kwargs = {
             "pinger": make_fake_pinger(),
+            "http_prober": make_fake_http_prober(),
             "list_interfaces": lambda: list(SIMULATE_INTERFACES),
         }
     ping_monitor = PingMonitor(

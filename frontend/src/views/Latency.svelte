@@ -13,6 +13,7 @@
     interval_seconds: 60,
     packet_count: 5,
     timeout_seconds: 2,
+    http_timeout_seconds: 10,
     raw_retention_days: 7,
     rollup_retention_days: 30,
     interface_colors: {} as Record<string, string>,
@@ -32,6 +33,7 @@
         interval_seconds: c.interval_seconds ?? 60,
         packet_count: c.packet_count ?? 5,
         timeout_seconds: c.timeout_seconds ?? 2,
+        http_timeout_seconds: c.http_timeout_seconds ?? 10,
         raw_retention_days: c.raw_retention_days ?? 7,
         rollup_retention_days: c.rollup_retention_days ?? 30,
         interface_colors: { ...(c.interface_colors ?? {}) },
@@ -50,6 +52,7 @@
       interval_seconds: Number(cfg.interval_seconds),
       packet_count: Number(cfg.packet_count),
       timeout_seconds: Number(cfg.timeout_seconds),
+      http_timeout_seconds: Number(cfg.http_timeout_seconds),
       raw_retention_days: Number(cfg.raw_retention_days),
       rollup_retention_days: Number(cfg.rollup_retention_days),
       targets: splitList(targetsText),
@@ -274,8 +277,10 @@
           <input class="ui-input" type="number" min="10" bind:value={cfg.interval_seconds} /></label>
         <label>pings / target
           <input class="ui-input" type="number" min="1" max="20" bind:value={cfg.packet_count} /></label>
-        <label>timeout (s)
+        <label>ping timeout (s)
           <input class="ui-input" type="number" min="1" max="30" bind:value={cfg.timeout_seconds} /></label>
+        <label>http timeout (s)
+          <input class="ui-input" type="number" min="1" max="60" bind:value={cfg.http_timeout_seconds} /></label>
         <label>keep raw (days)
           <input class="ui-input" type="number" min="1" max="90" bind:value={cfg.raw_retention_days} /></label>
         <label>keep rollups (days)
@@ -283,9 +288,9 @@
       </div>
 
       <div class="two">
-        <label>targets <span class="hint">(one per line, or comma/space separated)</span>
+        <label>targets <span class="hint">(one per line; IP/host = ping, http(s):// URL = web check)</span>
           <textarea class="ui-input ta" rows="5" bind:value={targetsText}
-            placeholder="1.1.1.1&#10;8.8.8.8"></textarea></label>
+            placeholder="1.1.1.1&#10;8.8.8.8&#10;https://google.com/generate_204"></textarea></label>
         <div class="ifaces">
           <label>interfaces <span class="hint">(empty = auto: every up interface)</span>
             <input class="ui-input" bind:value={interfacesText} placeholder="auto" /></label>

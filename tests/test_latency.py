@@ -246,6 +246,90 @@ class TestPingMonitor:
         db.close()
 
 
+class TestHttpTargets:
+    def _http_monitor(self, db, http_prober, clock):
+        store = StateStore()
+        store.set_state(State.CONNECTED, interface="wwan0")
+
+        def pinger(host, interface=None, count=5, timeout=2):
+            raise AssertionError(f"ICMP should not be used for {host!r}")
+
+        return PingMonitor(
+            store=store, db=db, events=EventLog(db), get_config=_config,
+            pinger=pinger, http_prober=http_prober,
+            list_interfaces=lambda: ["eth0"], monotonic=clock, wall_clock=clock,
+        )
+
+    def test_url_target_routed_to_http_prober(self):
+        from sim_monitor.monitor.ping_monitor import is_http_target
+
+        assert is_http_target("https://google.com/generate_204")
+        assert is_http_target("HTTP://x")
+        assert not is_http_target("1.1.1.1")
+        assert not is_http_target("dns.google")
+
+        db = Database(":memory:")
+        calls = []
+
+        def ok_http(url, interface=None, timeout=10):
+            calls.append((url, interface, timeout))
+            return {"ok": True, "status": 204, "latency_ms": 123}
+
+        mon = self._http_monitor(db, ok_http, lambda: 1_000_000.0)
+        rows = mon.probe(_config(targets=["https://google.com/generate_204"]))
+        # one row per interface (eth0 + cellular wwan0), no ICMP attempted
+        assert {c[0] for c in calls} == {"https://google.com/generate_204"}
+        assert {c[2] for c in calls} == {10}  # http_timeout_seconds default
+        assert all(r["sent"] == 1 and r["received"] == 1 for r in rows)
+        assert all(r["rtt_avg_ms"] == 123 and r["loss_pct"] == 0.0 for r in rows)
+        db.close()
+
+    def test_http_failure_is_total_loss_no_rtt(self):
+        db = Database(":memory:")
+
+        def bad_http(url, interface=None, timeout=10):
+            return {"ok": False, "status": None, "latency_ms": 10000, "error": "timeout"}
+
+        mon = self._http_monitor(db, bad_http, lambda: 1_000_000.0)
+        rows = mon.probe(_config(targets=["https://down.example"]))
+        assert all(r["received"] == 0 and r["loss_pct"] == 100.0 for r in rows)
+        assert all(r["rtt_avg_ms"] is None for r in rows)
+        db.close()
+
+    def test_http_4xx_5xx_counts_as_failure(self):
+        db = Database(":memory:")
+
+        def err_http(url, interface=None, timeout=10):
+            return {"ok": True, "status": 503, "latency_ms": 88}
+
+        mon = self._http_monitor(db, err_http, lambda: 1_000_000.0)
+        rows = mon.probe(_config(targets=["https://broken.example"]))
+        assert all(r["received"] == 0 and r["rtt_avg_ms"] is None for r in rows)
+        db.close()
+
+    def test_mixed_icmp_and_http_targets(self):
+        import random
+
+        db = Database(":memory:")
+        store = StateStore()
+        store.set_state(State.CONNECTED, interface="wwan0")
+
+        def ok_http(url, interface=None, timeout=10):
+            return {"ok": True, "status": 200, "latency_ms": 99}
+
+        mon = PingMonitor(
+            store=store, db=db, events=EventLog(db), get_config=_config,
+            pinger=make_fake_pinger(rng=random.Random(1)), http_prober=ok_http,
+            list_interfaces=lambda: ["eth0"], monotonic=lambda: 1e6, wall_clock=lambda: 1e6,
+        )
+        rows = mon.probe(_config(targets=["1.1.1.1", "https://google.com/generate_204"]))
+        http_rows = [r for r in rows if r["target"].startswith("https://")]
+        icmp_rows = [r for r in rows if r["target"] == "1.1.1.1"]
+        assert http_rows and icmp_rows
+        assert all(r["rtt_avg_ms"] == 99 for r in http_rows)
+        db.close()
+
+
 class TestPayloadStats:
     def _row(self, now, dt, target, recv, avg):
         return {"ts": now - dt, "interface": "wwan0", "target": target,
