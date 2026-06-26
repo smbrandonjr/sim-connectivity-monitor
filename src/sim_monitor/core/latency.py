@@ -183,13 +183,16 @@ def summarize_latency(
     }
 
 
-def _window_stats(rows: list[dict]) -> tuple[float | None, float | None]:
-    """(avg latency ms, loss %) for a set of raw sample rows, or (None, None)
-    when there are no rows (unknown — not zero/100)."""
+def _payload_window(out: dict, prefix: str, suffix: str, rows: list[dict]) -> None:
+    """Fill avg/min/max latency + loss for one window into `out`, leaving the
+    keys at None when the window has no data (unknown, not zero/100)."""
     if not rows:
-        return None, None
-    agg = _aggregate(rows)
-    return agg["rtt_avg_ms"], agg["loss_pct"]
+        return
+    a = _aggregate(rows)
+    out[f"{prefix}latency_{suffix}"] = a["rtt_avg_ms"]
+    out[f"{prefix}latency_min_{suffix}"] = a["rtt_min_ms"]
+    out[f"{prefix}latency_max_{suffix}"] = a["rtt_max_ms"]
+    out[f"{prefix}loss_{suffix}"] = a["loss_pct"]
 
 
 def payload_stats(samples: Iterable[dict], now: float, prefix: str = "") -> dict:
@@ -197,22 +200,30 @@ def payload_stats(samples: Iterable[dict], now: float, prefix: str = "") -> dict
     cycle plus trailing 1h/3h/6h/24h windows. `samples` is that interface's raw
     metric rows over the last 24h (across all targets). Always returns every key;
     a value is None when its window has no data, so unknowns are simply omitted
-    from the payload. Keys: <prefix>latency_ms/<prefix>loss_pct (last) and
-    <prefix>latency_<w>/<prefix>loss_<w> for w in 1h/3h/6h/24h. `prefix` is ""
-    for ICMP and "http_" for the web-check monitor."""
-    out: dict[str, float | None] = {f"{prefix}latency_ms": None, f"{prefix}loss_pct": None}
+    from the payload.
+
+    For each of {last cycle, 1h, 3h, 6h, 24h} it exposes avg/min/max latency and
+    loss. The "last cycle" keys use the bare suffix `ms` (e.g. <prefix>latency_ms,
+    <prefix>latency_min_ms, <prefix>latency_max_ms, <prefix>loss_pct); windows use
+    the label (e.g. <prefix>latency_24h, <prefix>latency_min_24h, ...). `prefix`
+    is "" for ICMP and "http_" for the web-check monitor."""
+    out: dict[str, float | None] = {}
+    for key in (f"{prefix}latency_ms", f"{prefix}latency_min_ms",
+                f"{prefix}latency_max_ms", f"{prefix}loss_pct"):
+        out[key] = None
     for label, _ in PAYLOAD_WINDOWS:
-        out[f"{prefix}latency_{label}"] = None
-        out[f"{prefix}loss_{label}"] = None
+        for key in (f"{prefix}latency_{label}", f"{prefix}latency_min_{label}",
+                    f"{prefix}latency_max_{label}", f"{prefix}loss_{label}"):
+            out[key] = None
     rows = list(samples)
     if not rows:
         return out
     last_ts = max(r["ts"] for r in rows)
-    out[f"{prefix}latency_ms"], out[f"{prefix}loss_pct"] = _window_stats(
-        [r for r in rows if r["ts"] == last_ts]
-    )
+    last = _aggregate([r for r in rows if r["ts"] == last_ts])
+    out[f"{prefix}latency_ms"] = last["rtt_avg_ms"]
+    out[f"{prefix}latency_min_ms"] = last["rtt_min_ms"]
+    out[f"{prefix}latency_max_ms"] = last["rtt_max_ms"]
+    out[f"{prefix}loss_pct"] = last["loss_pct"]
     for label, win in PAYLOAD_WINDOWS:
-        out[f"{prefix}latency_{label}"], out[f"{prefix}loss_{label}"] = _window_stats(
-            [r for r in rows if r["ts"] >= now - win]
-        )
+        _payload_window(out, prefix, label, [r for r in rows if r["ts"] >= now - win])
     return out

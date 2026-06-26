@@ -262,18 +262,26 @@ class TestPayloadStats:
         ]
         s = agg.payload_stats(rows, now)
         assert s["latency_ms"] == 45.0 and s["loss_pct"] == 0.0
+        assert s["latency_min_ms"] == 40.0 and s["latency_max_ms"] == 50.0
         assert s["latency_1h"] == 45.0 and s["loss_1h"] == 0.0  # only last cycle
         assert s["loss_3h"] == 5.0                              # sent 20, recv 19
         assert s["latency_3h"] == round(1170 / 19, 2)           # received-weighted
+        assert s["latency_min_3h"] == 40.0 and s["latency_max_3h"] == 80.0
         assert s["loss_24h"] == 5.0
+
+    def test_prefix_applies_to_every_key(self):
+        s = agg.payload_stats([], 1000.0, prefix="http_")
+        assert all(k.startswith("http_") for k in s)
+        assert "http_latency_min_ms" in s and "http_loss_24h" in s
 
     def test_empty_is_all_none(self):
         s = agg.payload_stats([], 1000.0)
         assert s["latency_ms"] is None and s["loss_24h"] is None
-        assert set(s) == {
-            "latency_ms", "loss_pct", "latency_1h", "loss_1h", "latency_3h", "loss_3h",
-            "latency_6h", "loss_6h", "latency_24h", "loss_24h",
-        }
+        assert all(v is None for v in s.values())
+        # last cycle + 4 windows, each with avg/min/max latency + loss = 5 × 4 keys
+        assert len(s) == 20
+        assert {"latency_ms", "latency_min_ms", "latency_max_ms", "loss_pct"} <= set(s)
+        assert {"latency_min_24h", "latency_max_1h"} <= set(s)
 
 
 class TestLatencyPlaceholderContext:

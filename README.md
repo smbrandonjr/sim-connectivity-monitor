@@ -161,14 +161,17 @@ are omitted from structured bodies:
   {cell_id} {tac} {pci} {mcc} {mnc} {operator_numeric} {channel}`
 - **Network:** `{ip_address} {gateway} {public_ip} {interface} {apn}` plus per-interface
   IPs `{eth0_ip} {wlan0_ip} {wwan0_ip}` (only for interfaces that are up)
-- **Latency / ping (cellular path, from the ping monitor):** `{latency_ms} {loss_pct}`
-  (most recent probe cycle) plus trailing-window averages `{latency_1h} {loss_1h}
-  {latency_3h} {loss_3h} {latency_6h} {loss_6h} {latency_24h} {loss_24h}`
-- **Web checks (cellular path, from the HTTP monitor):** `{http_latency_ms} {http_loss_pct}`
-  plus trailing-window averages `{http_latency_1h} {http_loss_1h} {http_latency_3h}
-  {http_loss_3h} {http_latency_6h} {http_loss_6h} {http_latency_24h} {http_loss_24h}`
-  (both latency/web sets are empty until their monitor has data; they survive a brief
-  disconnect via the last-known cellular interface)
+- **Latency / ping (cellular path, from the ping monitor):** for the most recent cycle
+  `{latency_ms} {latency_min_ms} {latency_max_ms} {loss_pct}`, and for each trailing
+  window `w` in `1h/3h/6h/24h`: `{latency_<w>} {latency_min_<w>} {latency_max_<w>}
+  {loss_<w>}` (e.g. `{latency_24h} {latency_max_24h} {loss_24h}`)
+- **Web checks (cellular path, from the HTTP monitor):** the same set with an `http_`
+  prefix — `{http_latency_ms} {http_latency_min_ms} {http_latency_max_ms} {http_loss_pct}`
+  and per-window `{http_latency_<w>} {http_latency_min_<w>} {http_latency_max_<w>}
+  {http_loss_<w>}`
+- (both latency/web sets are empty until their monitor has data; they survive a brief
+  disconnect via the last-known cellular interface. Pick exactly which ones to send in
+  the **Monitoring → Payload** builder, under the *latency* and *web* groups.)
 - **Host:** `{hostname} {uptime_s} {cpu_load} {mem_free_mb} {temperature_c}`
   (host metrics are Linux-only)
 - **Timing:** `{timestamp} {sampled_at}`
