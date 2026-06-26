@@ -160,16 +160,12 @@ class LatencyConfig(StrictModel):
 
     enabled: bool = False
     interval_seconds: int = Field(default=60, ge=10)  # lower = denser, raise to throttle
-    # Probe targets. A bare IP/hostname is pinged (ICMP); an http(s):// URL is
-    # fetched (one request per cycle, bound to each interface) and timed, with a
-    # response status < 400 counted as a success. Both kinds share the charts.
     targets: list[str] = Field(
         default=["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9"],
         min_length=1,
     )
-    packet_count: int = Field(default=5, ge=1, le=20)  # pings per ICMP target per cycle
-    timeout_seconds: int = Field(default=2, ge=1, le=30)  # per-ping timeout (ICMP)
-    http_timeout_seconds: int = Field(default=10, ge=1, le=60)  # request timeout (HTTP)
+    packet_count: int = Field(default=5, ge=1, le=20)  # pings per target per cycle
+    timeout_seconds: int = Field(default=2, ge=1, le=30)
     # Interfaces to probe. Empty = auto-enumerate every up interface each cycle.
     interfaces: list[str] = Field(default_factory=list)
     exclude_interfaces: list[str] = Field(default_factory=list)
@@ -179,6 +175,46 @@ class LatencyConfig(StrictModel):
     # so the same interface looks identical across devices. Unset interfaces get
     # a deterministic colour from their name. Values are "#rrggbb".
     interface_colors: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("interface_colors")
+    @classmethod
+    def _valid_hex_colors(cls, colors: dict[str, str]) -> dict[str, str]:
+        for iface, hexval in colors.items():
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}", hexval):
+                raise ValueError(f"interface_colors[{iface}] must be #rrggbb, got {hexval!r}")
+        return colors
+
+
+class HttpCheckConfig(StrictModel):
+    """Per-interface HTTP/website reachability monitor — a sibling of
+    LatencyConfig but for http(s):// endpoints. Each cycle it GETs every target
+    URL from every up interface (bound via SO_BINDTODEVICE), timing the request
+    and recording the response status. A status < 400 counts as a success; 4xx/
+    5xx, timeouts, and connection errors are failures. Stored separately from the
+    ICMP samples so ping and web reachability stay isolated end-to-end."""
+
+    enabled: bool = False
+    interval_seconds: int = Field(default=60, ge=10)
+    # http(s):// URLs. generate_204-style endpoints are ideal (tiny, no body).
+    targets: list[str] = Field(default=["https://google.com/generate_204"], min_length=1)
+    timeout_seconds: int = Field(default=10, ge=1, le=60)  # per-request timeout
+    # Interfaces to probe. Empty = auto-enumerate every up interface each cycle.
+    interfaces: list[str] = Field(default_factory=list)
+    exclude_interfaces: list[str] = Field(default_factory=list)
+    raw_retention_days: int = Field(default=7, ge=1, le=90)
+    rollup_retention_days: int = Field(default=30, ge=1, le=400)
+    interface_colors: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("targets")
+    @classmethod
+    def _valid_urls(cls, urls: list[str]) -> list[str]:
+        cleaned = []
+        for u in urls:
+            u = u.strip()
+            if not u.lower().startswith(("http://", "https://")):
+                raise ValueError(f"target {u!r} must be an http:// or https:// URL")
+            cleaned.append(u)
+        return cleaned
 
     @field_validator("interface_colors")
     @classmethod
@@ -327,6 +363,7 @@ class AppConfig(StrictModel):
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
     modem: ModemConfig = Field(default_factory=ModemConfig)
     latency: LatencyConfig = Field(default_factory=LatencyConfig)
+    http_checks: HttpCheckConfig = Field(default_factory=HttpCheckConfig)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     db_path: Path = Path("sim-monitor.db")
     profiles_dir: Path = Path("config/profiles.d")

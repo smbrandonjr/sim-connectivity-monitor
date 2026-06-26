@@ -111,6 +111,33 @@ CREATE TABLE IF NOT EXISTS icmp_rollups (
     UNIQUE(period, bucket_start, interface, target)
 );
 CREATE INDEX IF NOT EXISTS idx_icmp_rollups_bucket ON icmp_rollups(period, bucket_start);
+CREATE TABLE IF NOT EXISTS http_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    interface TEXT NOT NULL,
+    target TEXT NOT NULL,            -- the http(s):// URL
+    ok INTEGER NOT NULL,             -- 1 = success (status < 400), 0 = failure
+    status_code INTEGER,             -- HTTP status; NULL on timeout/conn error
+    latency_ms REAL                  -- request time; NULL on failure
+);
+CREATE INDEX IF NOT EXISTS idx_http_samples_ts ON http_samples(ts);
+CREATE TABLE IF NOT EXISTS http_rollups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bucket_start REAL NOT NULL,
+    period TEXT NOT NULL,            -- 'hour' | 'day'
+    interface TEXT NOT NULL,
+    target TEXT NOT NULL,
+    sample_count INTEGER NOT NULL,
+    sent INTEGER NOT NULL,
+    received INTEGER NOT NULL,
+    loss_pct REAL NOT NULL,
+    rtt_avg_ms REAL,
+    rtt_min_ms REAL,
+    rtt_max_ms REAL,
+    status_code INTEGER,             -- representative (last) status in the bucket
+    UNIQUE(period, bucket_start, interface, target)
+);
+CREATE INDEX IF NOT EXISTS idx_http_rollups_bucket ON http_rollups(period, bucket_start);
 CREATE TABLE IF NOT EXISTS sim_names (
     iccid TEXT PRIMARY KEY,
     name TEXT NOT NULL
@@ -536,6 +563,88 @@ class Database:
                 (since,),
             ).fetchall()
         return [r["interface"] for r in rows]
+
+    # ── per-interface HTTP/website checks ────────────────────────────────
+    _HTTP_SAMPLE_COLS = ("interface", "target", "ok", "status_code", "latency_ms")
+
+    def add_http_samples(self, ts: float, rows: list[dict[str, Any]]) -> None:
+        """Bulk-insert one HTTP-check cycle's per-(interface,target) results."""
+        if not rows:
+            return
+        params = [(ts, *[r.get(c) for c in self._HTTP_SAMPLE_COLS]) for r in rows]
+        cols = ", ".join(self._HTTP_SAMPLE_COLS)
+        with self._lock:
+            self._conn.executemany(
+                f"INSERT INTO http_samples (ts, {cols})"  # noqa: S608 — cols are internal
+                f" VALUES (?, {', '.join('?' * len(self._HTTP_SAMPLE_COLS))})",
+                params,
+            )
+            self._conn.commit()
+
+    def http_samples_between(
+        self, t0: float, t1: float, interface: str | None = None
+    ) -> list[dict]:
+        query = "SELECT * FROM http_samples WHERE ts >= ? AND ts <= ?"
+        args: list[Any] = [t0, t1]
+        if interface:
+            query += " AND interface = ?"
+            args.append(interface)
+        query += " ORDER BY ts ASC, id ASC"
+        with self._lock:
+            rows = self._conn.execute(query, args).fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_http_rollups(self, period: str, rows: list[dict[str, Any]]) -> None:
+        """Insert-or-replace HTTP aggregate buckets (idempotent on re-fold)."""
+        if not rows:
+            return
+        params = [
+            (
+                r["bucket_start"], period, r["interface"], r["target"],
+                r["sample_count"], r["sent"], r["received"], r["loss_pct"],
+                r.get("rtt_avg_ms"), r.get("rtt_min_ms"), r.get("rtt_max_ms"),
+                r.get("status_code"),
+            )
+            for r in rows
+        ]
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO http_rollups"
+                " (bucket_start, period, interface, target, sample_count,"
+                "  sent, received, loss_pct, rtt_avg_ms, rtt_min_ms, rtt_max_ms, status_code)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(period, bucket_start, interface, target) DO UPDATE SET"
+                "  sample_count=excluded.sample_count, sent=excluded.sent,"
+                "  received=excluded.received, loss_pct=excluded.loss_pct,"
+                "  rtt_avg_ms=excluded.rtt_avg_ms, rtt_min_ms=excluded.rtt_min_ms,"
+                "  rtt_max_ms=excluded.rtt_max_ms, status_code=excluded.status_code",
+                params,
+            )
+            self._conn.commit()
+
+    def http_rollups_between(
+        self, period: str, t0: float, t1: float, interface: str | None = None
+    ) -> list[dict]:
+        query = (
+            "SELECT * FROM http_rollups WHERE period = ?"
+            " AND bucket_start >= ? AND bucket_start <= ?"
+        )
+        args: list[Any] = [period, t0, t1]
+        if interface:
+            query += " AND interface = ?"
+            args.append(interface)
+        query += " ORDER BY bucket_start ASC, id ASC"
+        with self._lock:
+            rows = self._conn.execute(query, args).fetchall()
+        return [dict(r) for r in rows]
+
+    def http_last_rollup_bucket(self, period: str) -> float | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MAX(bucket_start) AS m FROM http_rollups WHERE period = ?",
+                (period,),
+            ).fetchone()
+        return row["m"] if row and row["m"] is not None else None
 
     def prune_older_than(self, table: str, cutoff: float, ts_col: str = "ts") -> None:
         """Delete rows older than `cutoff` (epoch seconds). Time-based retention

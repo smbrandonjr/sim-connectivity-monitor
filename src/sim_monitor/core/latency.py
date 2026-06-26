@@ -57,6 +57,26 @@ def _aggregate(rows: list[dict]) -> dict:
     }
 
 
+def http_sample_to_metric(row: dict) -> dict:
+    """Adapt an http_samples/http_rollups row to the icmp-shaped metric dict so
+    the shared aggregation/summary code can consume it. A single request is one
+    "packet": received iff ok, RTT = request latency (only when ok). The HTTP
+    status_code is carried through for display."""
+    ok = bool(row.get("ok"))
+    lat = row.get("latency_ms") if ok else None
+    return {
+        "ts": row.get("ts"),
+        "bucket_start": row.get("bucket_start"),
+        "interface": row["interface"],
+        "target": row["target"],
+        "sent": 1,
+        "received": 1 if ok else 0,
+        "loss_pct": 0.0 if ok else 100.0,
+        "rtt_avg_ms": lat, "rtt_min_ms": lat, "rtt_max_ms": lat,
+        "status_code": row.get("status_code"),
+    }
+
+
 def bucket(samples: Iterable[dict], period: str) -> list[dict]:
     """Group raw samples into (bucket_start, interface, target) aggregates.
 
@@ -71,6 +91,26 @@ def bucket(samples: Iterable[dict], period: str) -> list[dict]:
         agg = _aggregate(rows)
         out.append({
             "bucket_start": bstart, "interface": interface, "target": target, **agg,
+        })
+    return out
+
+
+def bucket_http(samples: Iterable[dict], period: str) -> list[dict]:
+    """Group raw http_samples into (bucket_start, interface, target) aggregates,
+    reusing the ICMP numeric aggregation and attaching a representative status
+    (the latest non-null in the bucket). Ready for storage.upsert_http_rollups."""
+    groups: dict[tuple[float, str, str], list[dict]] = {}
+    for s in samples:
+        key = (bucket_start(s["ts"], period), s["interface"], s["target"])
+        groups.setdefault(key, []).append(s)
+    out: list[dict] = []
+    for (bstart, interface, target), rows in sorted(groups.items()):
+        agg = _aggregate([http_sample_to_metric(r) for r in rows])
+        statuses = [(r["ts"], r["status_code"]) for r in rows if r.get("status_code") is not None]
+        last_status = max(statuses)[1] if statuses else None
+        out.append({
+            "bucket_start": bstart, "interface": interface, "target": target,
+            "status_code": last_status, **agg,
         })
     return out
 
@@ -100,13 +140,17 @@ def summarize_latency(
         if iface not in interfaces:
             interfaces.append(iface)
         key = f"{iface}|{r['target']}"
-        series.setdefault(key, []).append({
+        point = {
             "ts": r[ts_key],
             "loss_pct": r["loss_pct"],
             "rtt_avg_ms": r.get("rtt_avg_ms"),
             "rtt_min_ms": r.get("rtt_min_ms"),
             "rtt_max_ms": r.get("rtt_max_ms"),
-        })
+        }
+        # HTTP rows carry a status code; harmlessly absent for ICMP rows.
+        if "status_code" in r:
+            point["status_code"] = r.get("status_code")
+        series.setdefault(key, []).append(point)
         sent = int(r.get("sent") or 0)
         recv = int(r.get("received") or 0)
         by_iface_sent[iface] = by_iface_sent.get(iface, 0) + sent
@@ -148,26 +192,27 @@ def _window_stats(rows: list[dict]) -> tuple[float | None, float | None]:
     return agg["rtt_avg_ms"], agg["loss_pct"]
 
 
-def payload_stats(samples: Iterable[dict], now: float) -> dict:
+def payload_stats(samples: Iterable[dict], now: float, prefix: str = "") -> dict:
     """Heartbeat placeholders for one interface's latency/loss: the latest probe
     cycle plus trailing 1h/3h/6h/24h windows. `samples` is that interface's raw
-    rows over the last 24h (across all targets). Always returns every key; a
-    value is None when its window has no data, so unknowns are simply omitted
-    from the payload. Keys: latency_ms/loss_pct (last) and
-    latency_<w>/loss_<w> for w in 1h/3h/6h/24h."""
-    out: dict[str, float | None] = {"latency_ms": None, "loss_pct": None}
+    metric rows over the last 24h (across all targets). Always returns every key;
+    a value is None when its window has no data, so unknowns are simply omitted
+    from the payload. Keys: <prefix>latency_ms/<prefix>loss_pct (last) and
+    <prefix>latency_<w>/<prefix>loss_<w> for w in 1h/3h/6h/24h. `prefix` is ""
+    for ICMP and "http_" for the web-check monitor."""
+    out: dict[str, float | None] = {f"{prefix}latency_ms": None, f"{prefix}loss_pct": None}
     for label, _ in PAYLOAD_WINDOWS:
-        out[f"latency_{label}"] = None
-        out[f"loss_{label}"] = None
+        out[f"{prefix}latency_{label}"] = None
+        out[f"{prefix}loss_{label}"] = None
     rows = list(samples)
     if not rows:
         return out
     last_ts = max(r["ts"] for r in rows)
-    out["latency_ms"], out["loss_pct"] = _window_stats(
+    out[f"{prefix}latency_ms"], out[f"{prefix}loss_pct"] = _window_stats(
         [r for r in rows if r["ts"] == last_ts]
     )
     for label, win in PAYLOAD_WINDOWS:
-        out[f"latency_{label}"], out[f"loss_{label}"] = _window_stats(
+        out[f"{prefix}latency_{label}"], out[f"{prefix}loss_{label}"] = _window_stats(
             [r for r in rows if r["ts"] >= now - win]
         )
     return out

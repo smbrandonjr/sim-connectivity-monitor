@@ -232,6 +232,50 @@ class TestLatencyConfig:
         assert resp.status_code == 400
 
 
+class TestHttpChecksConfig:
+    def test_get_returns_config_default(self, sim, client):
+        data = client.get("/api/http-checks-config.json").get_json()
+        assert data["enabled"] is False
+        assert any(t.startswith("http") for t in data["targets"])
+
+    def test_put_persists_and_hot_reloads(self, sim, client):
+        from sim_monitor.monitor.http_check_monitor import effective_http_check_config
+
+        body = {"enabled": True, "interval_seconds": 90,
+                "targets": ["https://google.com/generate_204"], "timeout_seconds": 8}
+        resp = client.put("/api/http-checks-config", json=body)
+        assert resp.status_code == 200 and resp.get_json()["ok"] is True
+        got = client.get("/api/http-checks-config.json").get_json()
+        assert got["enabled"] is True and got["interval_seconds"] == 90
+        eff = effective_http_check_config(sim.db, sim.config.http_checks)
+        assert eff.enabled is True and eff.timeout_seconds == 8
+
+    def test_put_rejects_non_url_target(self, sim, client):
+        resp = client.put("/api/http-checks-config", json={"targets": ["1.1.1.1"]})
+        assert resp.status_code == 400
+
+    def test_data_endpoint_returns_status_in_series(self, sim, client):
+        sim.db.add_http_samples(1_000_000.0, [
+            {"interface": "wwan0", "target": "https://x", "ok": 1,
+             "status_code": 204, "latency_ms": 120},
+        ])
+        data = client.get("/api/http-checks.json?from=999000&to=1000001").get_json()
+        assert data["source"] == "raw"
+        key = "wwan0|https://x"
+        assert key in data["series"]
+        assert data["series"][key][0]["status_code"] == 204
+
+    def test_csv_export_has_url_and_status_columns(self, sim, client):
+        sim.db.add_http_samples(1_000_000.0, [
+            {"interface": "wwan0", "target": "https://x", "ok": 0,
+             "status_code": 503, "latency_ms": None},
+        ])
+        body = client.get("/api/http-checks.csv?from=999000&to=1000001").get_data(as_text=True)
+        lines = body.splitlines()
+        assert lines[0].startswith("ts_iso,ts_epoch,source,interface,url,status_code")
+        assert "wwan0,https://x,503" in body
+
+
 class TestSmsAutoReplyConfig:
     def test_get_returns_disabled_default(self, sim, client):
         data = client.get("/api/sms-autoreply.json").get_json()

@@ -52,11 +52,40 @@ export const api = {
     if (iface) q.set("interface", iface);
     return `/api/latency.csv?${q.toString()}`;
   },
+  httpChecks: (from?: number, to?: number, iface?: string) => {
+    const q = new URLSearchParams();
+    if (from != null) q.set("from", String(Math.floor(from)));
+    if (to != null) q.set("to", String(Math.floor(to)));
+    if (iface) q.set("interface", iface);
+    return getJSON<any>(`/api/http-checks.json?${q.toString()}`);
+  },
+  httpChecksCsvUrl: (from?: number, to?: number, iface?: string) => {
+    const q = new URLSearchParams();
+    if (from != null) q.set("from", String(Math.floor(from)));
+    if (to != null) q.set("to", String(Math.floor(to)));
+    if (iface) q.set("interface", iface);
+    return `/api/http-checks.csv?${q.toString()}`;
+  },
   monitorConfig: () => getJSON<any>("/api/monitor-config.json"),
   latencyConfig: () => getJSON<any>("/api/latency-config.json"),
+  httpCheckConfig: () => getJSON<any>("/api/http-checks-config.json"),
 
   async saveLatencyConfig(cfg: Record<string, unknown>): Promise<boolean> {
     const res = await fetch("/api/latency-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(data.error || "save failed", "error");
+      return false;
+    }
+    return true;
+  },
+
+  async saveHttpCheckConfig(cfg: Record<string, unknown>): Promise<boolean> {
+    const res = await fetch("/api/http-checks-config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(cfg),

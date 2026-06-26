@@ -152,6 +152,71 @@ def latency_csv():
     )
 
 
+def _http_check_rows(db, frm: float, to: float, interface: str | None):
+    """Pick the HTTP-check source by window size (raw -> hourly -> daily), like
+    _latency_rows. Raw samples are adapted to the shared metric shape so the same
+    summarizer/CSV code applies; rollups are already metric-shaped."""
+    from sim_monitor.core.latency import http_sample_to_metric
+
+    span = to - frm
+    if span <= 2 * 86400:
+        raw = db.http_samples_between(frm, to, interface=interface)
+        return [http_sample_to_metric(r) for r in raw], "ts", "raw"
+    if span <= 14 * 86400:
+        return db.http_rollups_between("hour", frm, to, interface=interface), "bucket_start", "hour"
+    return db.http_rollups_between("day", frm, to, interface=interface), "bucket_start", "day"
+
+
+@bp.get("/http-checks.json")
+def http_checks():
+    """Per-interface HTTP/website reachability series for a window (web sibling
+    of latency.json). Same query params and source auto-scaling; each series
+    point also carries the response `status_code`."""
+    from sim_monitor.core.latency import summarize_latency
+
+    db = sim().db
+    frm, to, interface = _latency_window()
+    rows, ts_key, source = _http_check_rows(db, frm, to, interface)
+    summary = summarize_latency(rows, frm, to, ts_key=ts_key)
+    summary["source"] = source
+    summary["cellular_interface"] = sim().store.get().interface
+    return jsonify(summary)
+
+
+@bp.get("/http-checks.csv")
+def http_checks_csv():
+    """The window's HTTP-check rows as CSV (same source resolution as
+    http-checks.json). One row per (timestamp, interface, URL)."""
+    import csv
+    import io
+
+    db = sim().db
+    frm, to, interface = _latency_window()
+    rows, ts_key, source = _http_check_rows(db, frm, to, interface)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "ts_iso", "ts_epoch", "source", "interface", "url", "status_code",
+        "sent", "received", "loss_pct", "rtt_avg_ms", "rtt_min_ms", "rtt_max_ms",
+    ])
+    for r in rows:
+        epoch = r[ts_key]
+        iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+        writer.writerow([
+            iso, f"{epoch:.0f}", source, r["interface"], r["target"],
+            r.get("status_code"),
+            r.get("sent"), r.get("received"), r.get("loss_pct"),
+            r.get("rtt_avg_ms"), r.get("rtt_min_ms"), r.get("rtt_max_ms"),
+        ])
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    name = f"sim-monitor-http-checks-{source}-{stamp}.csv"
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
 @bp.get("/urcs.json")
 def urcs():
     return jsonify(sim().db.recent_urcs(limit=300))
@@ -330,7 +395,10 @@ def command(name: str):
 def placeholders():
     """Current values of every heartbeat placeholder, for the payload builder's
     live preview (host metrics + sampled_at included)."""
-    from sim_monitor.monitor.http_monitor import latency_placeholder_context
+    from sim_monitor.monitor.http_monitor import (
+        http_check_placeholder_context,
+        latency_placeholder_context,
+    )
     from sim_monitor.system.host import collect_host_metrics, collect_interface_ips
 
     app = sim()
@@ -339,6 +407,7 @@ def placeholders():
     ctx.update(collect_host_metrics())
     ctx.update(collect_interface_ips())
     ctx.update(latency_placeholder_context(app.db, snapshot.interface))
+    ctx.update(http_check_placeholder_context(app.db, snapshot.interface))
     ctx["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     return jsonify(ctx)
 
@@ -387,6 +456,34 @@ def latency_config_put():
         "latency",
         f"latency monitor config updated (enabled={config.enabled}, "
         f"interval={config.interval_seconds}s)",
+    )
+    return jsonify({"ok": True})
+
+
+@bp.get("/http-checks-config.json")
+def http_checks_config_get():
+    """The effective HTTP-check monitor config: the UI-managed setting if saved,
+    else the config.yaml default. Edits hot-reload on the next cycle."""
+    app = sim()
+    raw = app.db.get_setting("http_checks")
+    return jsonify(raw or app.config.http_checks.model_dump(mode="json"))
+
+
+@bp.put("/http-checks-config")
+def http_checks_config_put():
+    from sim_monitor.config.schema import HttpCheckConfig
+
+    body = _body()
+    try:
+        config = HttpCheckConfig.model_validate(body)
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    app = sim()
+    app.db.set_setting("http_checks", config.model_dump(mode="json"))
+    app.events.info(
+        "http_check",
+        f"http-check monitor config updated (enabled={config.enabled}, "
+        f"interval={config.interval_seconds}s, {len(config.targets)} target(s))",
     )
     return jsonify({"ok": True})
 

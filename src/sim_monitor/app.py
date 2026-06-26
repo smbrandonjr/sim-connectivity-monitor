@@ -78,12 +78,16 @@ def build(config: AppConfig, profiles: list[Profile]) -> App:
 
 
 def run(config: AppConfig, profiles: list[Profile]) -> int:
+    from sim_monitor.monitor.http_check_monitor import (
+        HttpCheckMonitor,
+        effective_http_check_config,
+        make_fake_http_prober,
+    )
     from sim_monitor.monitor.http_monitor import HttpMonitor
     from sim_monitor.monitor.ping_monitor import (
         SIMULATE_INTERFACES,
         PingMonitor,
         effective_latency_config,
-        make_fake_http_prober,
         make_fake_pinger,
     )
     from sim_monitor.web import server
@@ -106,13 +110,18 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
     )
     monitor_thread.start()
 
-    # Per-interface latency/packet-loss monitor. Real `ping` doesn't exist on the
-    # dev box, so simulate mode injects a fake pinger over a fixed interface set.
+    # Per-interface latency/packet-loss (ICMP) monitor. Real `ping` doesn't exist
+    # on the dev box, so simulate mode injects a fake pinger over a fixed
+    # interface set.
     ping_kwargs: dict = {}
+    http_check_kwargs: dict = {}
     if config.simulate:
         ping_kwargs = {
             "pinger": make_fake_pinger(),
-            "http_prober": make_fake_http_prober(),
+            "list_interfaces": lambda: list(SIMULATE_INTERFACES),
+        }
+        http_check_kwargs = {
+            "prober": make_fake_http_prober(),
             "list_interfaces": lambda: list(SIMULATE_INTERFACES),
         }
     ping_monitor = PingMonitor(
@@ -127,6 +136,20 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
     )
     ping_thread.start()
 
+    # Per-interface HTTP/website reachability monitor (separate storage + config).
+    http_check_monitor = HttpCheckMonitor(
+        store=app.store,
+        db=app.db,
+        events=app.events,
+        get_config=lambda: effective_http_check_config(app.db, app.config.http_checks),
+        **http_check_kwargs,
+    )
+    http_check_thread = threading.Thread(
+        target=http_check_monitor.run, args=(app.stop,), name="http-check-monitor",
+        daemon=True,
+    )
+    http_check_thread.start()
+
     flask_app = server.create_app(app)
     try:
         server.serve(flask_app, config.web.host, config.web.port)
@@ -137,5 +160,6 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
         daemon_thread.join(timeout=10)
         monitor_thread.join(timeout=5)
         ping_thread.join(timeout=5)
+        http_check_thread.join(timeout=5)
         app.db.close()
     return 0

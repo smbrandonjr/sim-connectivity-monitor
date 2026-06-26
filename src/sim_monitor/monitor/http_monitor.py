@@ -52,6 +52,24 @@ def latency_placeholder_context(db: Database, interface: str | None) -> dict:
     return payload_stats(samples, now)
 
 
+def http_check_placeholder_context(db: Database, interface: str | None) -> dict:
+    """Web-check (HTTP) heartbeat placeholders (http_latency_ms/http_loss_pct +
+    1h/3h/6h/24h windows) for the given interface, from the last 24h of HTTP
+    samples. Mirrors latency_placeholder_context but keyed with an `http_`
+    prefix so ping and web stats stay distinct in the payload. Empty/None values
+    when the web-check monitor has no data."""
+    from sim_monitor.core.latency import http_sample_to_metric, payload_stats
+
+    iface = interface or db.get_setting("cellular_interface")
+    now = time.time()
+    rows = (
+        db.http_samples_between(now - 86400, now, interface=iface)
+        if iface else []
+    )
+    metrics = [http_sample_to_metric(r) for r in rows]
+    return payload_stats(metrics, now, prefix="http_")
+
+
 class HttpMonitor:
     def __init__(
         self,
@@ -147,6 +165,7 @@ class HttpMonitor:
         context.update(collect_host_metrics())
         context.update(collect_interface_ips())
         context.update(latency_placeholder_context(self.db, snapshot.interface))
+        context.update(http_check_placeholder_context(self.db, snapshot.interface))
         context["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         # URL + headers are string-templated; the body is either built from
         # structured fields (always-valid JSON) or string-templated for raw use.

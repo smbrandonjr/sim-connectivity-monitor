@@ -14,8 +14,8 @@ Install it on a Pi, plug in a modem, and it will:
 - Send a configurable **HTTP heartbeat** out the cellular interface with SIM-specific
   placeholders (`{iccid}`, `{imei}`, `{signal_rssi}`, …)
 - Serve a **LAN web UI** for live status, profile management, SMS (inbox/send/auto-reply),
-  continuous **per-interface latency / packet-loss charts**, on-device network tools
-  (host/port scan, reachability, traceroute), and manual actions
+  continuous **per-interface latency (ICMP) and web-check (HTTP) charts**, on-device
+  network tools (host/port scan, reachability, traceroute), and manual actions
 - Support **Hologram fallback/outage-protection testing** (airplane mode for ~15 min so the
   SIM applet switches profiles, then reconnect and observe the new identity)
 - Handle **hot SIM swaps** (ICCID change → automatic re-match and reconnect)
@@ -105,11 +105,12 @@ Browse to `http://<pi-address>:8080` from your LAN.
   inbound SMS matches).
 - **Monitoring** — heartbeat configuration, an optional schedule window, and recent
   heartbeat history.
-- **Latency** — continuous per-interface latency & packet-loss monitor: interactive
-  charts (one colour-coded line per interface, drag-to-zoom, hover tooltips), preset
-  and custom timeframes, a per-interface/target summary table, and CSV export. The
-  monitor settings (targets, interval, ping count, retention, interface colours) are
-  editable inline and hot-reload on the next cycle.
+- **Latency** — two continuous per-interface monitors: **ping** (ICMP latency &
+  packet loss) and **web checks** (HTTP endpoint reachability with status codes). Each
+  has interactive charts (one colour-coded line per interface, drag-to-zoom, hover
+  tooltips), preset/custom timeframes, a per-interface/target summary table, and CSV
+  export. Settings (targets, interval, timeout, retention, colours) are editable inline
+  and hot-reload on the next cycle.
 - **Scan** — network tools (host discovery, port scan, reachability checks,
   traceroute), optionally bound to a specific interface.
 - **Timeline** — everything the daemon did (events, URCs, identity changes).
@@ -160,11 +161,14 @@ are omitted from structured bodies:
   {cell_id} {tac} {pci} {mcc} {mnc} {operator_numeric} {channel}`
 - **Network:** `{ip_address} {gateway} {public_ip} {interface} {apn}` plus per-interface
   IPs `{eth0_ip} {wlan0_ip} {wwan0_ip}` (only for interfaces that are up)
-- **Latency (cellular path, from the Latency monitor):** `{latency_ms} {loss_pct}`
+- **Latency / ping (cellular path, from the ping monitor):** `{latency_ms} {loss_pct}`
   (most recent probe cycle) plus trailing-window averages `{latency_1h} {loss_1h}
-  {latency_3h} {loss_3h} {latency_6h} {loss_6h} {latency_24h} {loss_24h}` (empty until
-  the latency monitor has data; survive a brief disconnect via the last-known cellular
-  interface)
+  {latency_3h} {loss_3h} {latency_6h} {loss_6h} {latency_24h} {loss_24h}`
+- **Web checks (cellular path, from the HTTP monitor):** `{http_latency_ms} {http_loss_pct}`
+  plus trailing-window averages `{http_latency_1h} {http_loss_1h} {http_latency_3h}
+  {http_loss_3h} {http_latency_6h} {http_loss_6h} {http_latency_24h} {http_loss_24h}`
+  (both latency/web sets are empty until their monitor has data; they survive a brief
+  disconnect via the last-known cellular interface)
 - **Host:** `{hostname} {uptime_s} {cpu_load} {mem_free_mb} {temperature_c}`
   (host metrics are Linux-only)
 - **Timing:** `{timestamp} {sampled_at}`
@@ -187,29 +191,33 @@ off by default (send around the clock). A manual **override** can force sending 
 regardless of the window, and **Send heartbeat now** always fires. A badge shows whether
 the monitor is sending right now.
 
-## 8. Latency & packet-loss monitoring
+## 8. Latency & web-check monitoring
 
-The **Latency** tab runs an independent monitor that probes a set of targets from
-*every* up interface — cellular plus any ethernet/Wi-Fi — each cycle. Probing from all
-interfaces side-by-side makes it obvious whether a problem is cellular-only or systemic.
-Raw per-cycle samples are kept short-term and folded into hourly/daily rollups for
-long-term history.
+The **Latency** tab hosts **two independent monitors**, each probing from *every* up
+interface — cellular plus any ethernet/Wi-Fi — so it's obvious whether a problem is
+cellular-only or systemic. Each keeps raw per-cycle samples short-term and folds them into
+hourly/daily rollups for long-term history. Both are **off by default**.
 
-Targets are mixed and auto-routed by what you type: a **bare IP/host** is pinged (ICMP),
-while an **`http(s)://` URL** (e.g. `https://google.com/generate_204`) is fetched once per
-cycle — bound to each interface and timed, with a response status `< 400` counted as a
-success. HTTP checks prove real end-to-end web reachability even when a carrier blocks or
-deprioritizes ICMP. Both kinds share the same charts, summary table, and CSV export.
+- **Latency & packet loss (ping)** — ICMP pings a set of IP/host targets (public DNS
+  anycast IPs by default), charting round-trip time and packet loss.
+- **Web checks (HTTP)** — GETs a set of `http(s)://` URLs (e.g.
+  `https://google.com/generate_204`), bound to each interface and timed, recording the
+  **HTTP status code** and request latency; a status `< 400` is a success. This proves
+  real end-to-end web reachability even when a carrier blocks or deprioritizes ICMP. The
+  summary table and CSV include a status column.
 
-It's **off by default** — open the tab's settings (gear icon), tick **Enabled**, and
-optionally adjust targets, interval, pings-per-target, retention, and per-interface
-chart colours. Changes hot-reload on the next probe cycle (no restart). Charts support
-preset (1h–30d) and custom timeframes, drag-to-zoom, and hover tooltips; a summary table
-and CSV export cover the selected window. The cellular path's recent stats are also
-exposed as heartbeat placeholders (see `{latency_ms}`, `{loss_24h}`, etc. above).
+Each panel has its own settings (gear icon): enable, targets, interval, timeout, retention,
+and per-interface chart colours (the ping panel also has pings-per-target). Changes
+hot-reload on the next cycle (no restart). Charts support preset (1h–30d) and custom
+timeframes, drag-to-zoom, and hover tooltips; a summary table and CSV export cover the
+selected window.
 
-Defaults also live in `config.yaml`'s `latency:` block; the in-UI settings override them
-and persist on the device.
+Each monitor exposes the cellular path's recent stats as heartbeat placeholders: ICMP as
+`{latency_ms}` / `{loss_pct}` (+ `{latency_1h…24h}` / `{loss_1h…24h}`) and the web checks
+as `{http_latency_ms}` / `{http_loss_pct}` (+ `{http_latency_1h…24h}` / `{http_loss_1h…24h}`).
+
+Defaults also live in `config.yaml`'s `latency:` and `http_checks:` blocks; the in-UI
+settings override them and persist on the device.
 
 ## 9. Test Hologram fallback / outage protection
 
@@ -263,8 +271,9 @@ Run through this once per new modem model / OS image:
 11. `sudo mmcli -m 0 --disable` → supervisor recovers without a service restart.
 12. `sudo kill -STOP $(pidof -x python | head -1)` (or the sim-monitor PID) → systemd
     watchdog restarts it once; no restart loop.
-13. Enable the Latency monitor → within a couple of cycles the charts show a line per
-    up interface (cellular + ethernet/Wi-Fi); CSV export downloads the window.
+13. Enable the Latency tab's **ping** and **web checks** monitors → within a couple of
+    cycles each chart shows a line per up interface (cellular + ethernet/Wi-Fi), the web
+    summary lists HTTP status codes, and CSV export downloads the window.
 14. Reboot → reconnects unattended within ~1–2 min of boot.
 
 ---
