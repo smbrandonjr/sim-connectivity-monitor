@@ -67,7 +67,9 @@ class HttpCheckMonitor:
         self.list_interfaces = list_interfaces
         self._monotonic = monotonic
         self._wall_clock = wall_clock
-        self._next_due: float | None = None
+        # Last probe time (monotonic); due is derived from the current interval so
+        # shortening it takes effect immediately.
+        self._last_sent: float | None = None
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -86,10 +88,10 @@ class HttpCheckMonitor:
         if config is None or not config.targets:
             return
         now = self._monotonic()
-        due = self._next_due is None or now >= self._next_due
+        due = self._last_sent is None or now - self._last_sent >= config.interval_seconds
         if not (forced or (config.enabled and due)):
             return
-        self._next_due = now + config.interval_seconds
+        self._last_sent = now
         self.probe(config)
 
     def _interfaces(self, config: HttpCheckConfig) -> list[str]:

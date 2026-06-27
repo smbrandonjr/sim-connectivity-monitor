@@ -134,14 +134,15 @@
     ...probeFields("http_", "web", "meta.web", "response", "fail"),
   );
   const GROUPS = ["Top level", "signal", "meta", "latency", "web"];
-  const RECOMMENDED = ["iccid", "status", "signal.rssi_dbm", "signal.rsrp_dbm", "signal.sinr_db",
-    "signal.band", "meta.imei", "meta.fw", "meta.ip", "meta.sampled_at"];
+
+  const asField = (c: { path: string; value: string }) =>
+    ({ path: c.path, value: c.value, kind: "placeholder" });
 
   function selected(path: string) { return fields.some((f) => f.path === path); }
   function toggle(item: { path: string; value: string }) {
     fields = selected(item.path)
       ? fields.filter((f) => f.path !== item.path)
-      : [...fields, { path: item.path, value: item.value, kind: "placeholder" }];
+      : [...fields, asField(item)];
   }
   function removeField(path: string) { fields = fields.filter((f) => f.path !== path); }
   function addCustom() {
@@ -149,11 +150,24 @@
     fields = [...fields, { ...custom, path: custom.path.trim() }];
     custom = { path: "", value: "", kind: "static" };
   }
-  function selectRecommended() {
-    fields = CATALOG.filter((c) => RECOMMENDED.includes(c.path))
-      .map((c) => ({ path: c.path, value: c.value, kind: "placeholder" }));
-  }
   function isCustom(f: { path: string }) { return !CATALOG.some((c) => c.path === f.path); }
+
+  // Select/deselect all catalog chips (custom fields are left untouched).
+  function selectAll() { fields = [...CATALOG.map(asField), ...fields.filter(isCustom)]; }
+  function deselectAll() { fields = fields.filter(isCustom); }
+  function selectGroup(g: string) {
+    const items = CATALOG.filter((c) => c.group === g);
+    const paths = new Set(items.map((c) => c.path));
+    fields = [...fields.filter((f) => !paths.has(f.path)), ...items.map(asField)];
+  }
+  function deselectGroup(g: string) {
+    const paths = new Set(CATALOG.filter((c) => c.group === g).map((c) => c.path));
+    fields = fields.filter((f) => !paths.has(f.path));
+  }
+  $: groupCount = (g: string) => {
+    const paths = new Set(CATALOG.filter((c) => c.group === g).map((c) => c.path));
+    return fields.filter((f) => paths.has(f.path)).length;
+  };
 
   // Live preview mirroring the server's render_body_fields (omit unknowns, keep types).
   function buildPreview(flds: typeof fields, ph: Record<string, any>) {
@@ -392,12 +406,17 @@
       builder — it always produces valid JSON and correct number/string types.</p>
   {:else}
     <div class="row">
-      <button class="ui-btn ui-btn-sm" on:click={selectRecommended}>Use recommended set</button>
-      <button class="ui-btn ui-btn-sm" on:click={() => (fields = [])}>Clear</button>
+      <button class="ui-btn ui-btn-sm" on:click={selectAll}>Select all</button>
+      <button class="ui-btn ui-btn-sm" on:click={deselectAll}>Deselect all</button>
       <span class="muted">Click fields to include them. Unknown values are dropped automatically.</span>
     </div>
     {#each GROUPS as g}
-      <h3 style="font-size:var(--fs-sm);margin:12px 0 4px;color:var(--color-text-muted)">{g === "Top level" ? "Top level" : g + ".*"}</h3>
+      <div class="grouphdr">
+        <h3>{g === "Top level" ? "Top level" : g + ".*"}</h3>
+        <span class="muted gcount">{groupCount(g)}/{CATALOG.filter((c) => c.group === g).length}</span>
+        <button class="linkish" on:click={() => selectGroup(g)}>all</button>
+        <button class="linkish" on:click={() => deselectGroup(g)}>none</button>
+      </div>
       <div class="chips">
         {#each CATALOG.filter((c) => c.group === g) as item}
           <button class="chip" class:on={selectedPaths.has(item.path)} on:click={() => toggle(item)}
@@ -478,6 +497,14 @@
     margin-top: 10px; padding-top: 10px;
     border-top: 1px solid var(--color-border, #2a2a2a);
     display: flex; flex-direction: column; gap: 8px;
+  }
+
+  .grouphdr { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; }
+  .grouphdr h3 { font-size: var(--fs-sm); margin: 0; color: var(--color-text-muted); }
+  .grouphdr .gcount { font-size: var(--fs-xs, 11px); }
+  .linkish {
+    background: none; border: none; padding: 0; cursor: pointer; font: inherit;
+    font-size: var(--fs-xs, 11px); color: var(--color-primary); text-decoration: underline;
   }
 
   .save-status { font-size: var(--fs-sm, 13px); min-width: 84px; }

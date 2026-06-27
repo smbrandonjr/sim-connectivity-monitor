@@ -204,6 +204,27 @@ def test_destination_holds_until_its_interval(env):
     assert len(session.calls) == 1
 
 
+def test_shortening_interval_takes_effect_immediately(env):
+    """Lowering the interval pulls the next send earlier (due derives from the
+    current interval, not a deadline frozen at the last send)."""
+    import time as _t
+
+    monitor, session, _ = env
+    cfg = monitor_cfg(egress="auto", url="https://x/", interval_seconds=600)
+    monitor.get_config = lambda: cfg
+    monitor._iteration(forced=False)          # first fire, records last-sent
+    assert len(session.calls) == 1
+    # Pretend the last send was 90s ago; with the long interval it's not due.
+    key = next(iter(monitor._last_sent))
+    monitor._last_sent[key] = _t.monotonic() - 90
+    monitor._iteration(forced=False)
+    assert len(session.calls) == 1
+    # Shorten to 60s -> 90s since last send is now past due -> fires right away.
+    cfg.destinations[0].interval_seconds = 60
+    monitor._iteration(forced=False)
+    assert len(session.calls) == 2
+
+
 STATUS_CFG = monitor_cfg(
     egress="auto",
     url="https://hooks.example.com/hb",
@@ -316,7 +337,7 @@ class TestPause:
         monitor.store.update(monitor_paused=True)
         monitor._iteration(forced=False)
         assert session.calls == []
-        assert monitor._next_due == {}  # schedule held, fires promptly on resume
+        assert monitor._last_sent == {}  # schedule held, fires promptly on resume
 
     def test_manual_send_works_while_paused(self, env):
         monitor, session, _ = env
@@ -357,7 +378,7 @@ class TestSchedule:
         monitor._wall_clock = lambda: self.SUN_OUT
         monitor._iteration(forced=False)
         assert session.calls == []
-        assert monitor._next_due == {}  # schedule held; fires when window opens
+        assert monitor._last_sent == {}  # schedule held; fires when window opens
 
     def test_manual_send_bypasses_schedule(self, env):
         monitor, session, _ = env

@@ -108,8 +108,10 @@ class HttpMonitor:
         self._wall_clock = wall_clock or (lambda: datetime.now(UTC))
         # Enumerates up interfaces, to resolve the configured egress (injectable).
         self.list_interfaces = list_interfaces
-        # Per-destination next-due time (monotonic), keyed by a stable dest key.
-        self._next_due: dict[str, float] = {}
+        # Per-destination last-sent time (monotonic), keyed by a stable dest key.
+        # Due is derived as now - last >= interval, so editing the interval takes
+        # effect immediately instead of waiting out the previously-scheduled due.
+        self._last_sent: dict[str, float] = {}
         self._next_public_ip = 0.0
 
     @staticmethod
@@ -167,14 +169,14 @@ class HttpMonitor:
             if not dest.enabled:
                 continue
             key = self._dest_key(dest)
-            due = self._next_due.get(key)
+            last = self._last_sent.get(key)
             scheduled = (
                 config.enabled
                 and is_active(dest.schedule, wall)
-                and (due is None or now >= due)
+                and (last is None or now - last >= dest.interval_seconds)
             )
             if forced or scheduled:
-                self._next_due[key] = now + dest.interval_seconds
+                self._last_sent[key] = now
                 to_fire.append(dest)
         if not to_fire:
             return
