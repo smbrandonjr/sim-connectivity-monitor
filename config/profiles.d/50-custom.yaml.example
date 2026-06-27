@@ -61,7 +61,7 @@ monitor:
   enabled: false
   # interval_seconds: 300
   # send_when_degraded: true   # keep sending over wifi/eth while cellular is down
-  # bind_cellular: true        # false = endpoint only reachable via LAN/VPN
+  # egress: wlan               # wlan (default) | cellular | auto (OS routes; LAN/VPN)
   # request:
   #   method: POST
   #   url: "https://hooks.example.com/heartbeat"

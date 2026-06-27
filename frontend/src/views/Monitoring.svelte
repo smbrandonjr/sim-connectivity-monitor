@@ -9,7 +9,7 @@
   let enabled = false;
   let interval_seconds = 300;
   let send_when_degraded = true;
-  let bind_cellular = true;
+  let egress = "wlan"; // "wlan" | "cellular" | "auto"
 
   // schedule window (limit heartbeats to e.g. Mon-Fri 9-6 Eastern)
   const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -167,7 +167,7 @@
     enabled = !!c.enabled;
     interval_seconds = c.interval_seconds ?? 300;
     send_when_degraded = c.send_when_degraded ?? true;
-    bind_cellular = c.bind_cellular ?? true;
+    egress = c.egress ?? "wlan";
     if (c.schedule) sched = { ...sched, ...c.schedule };
     const r = c.request ?? {};
     method = r.method ?? "POST";
@@ -200,7 +200,7 @@
     const hdrs: Record<string, string> = {};
     for (const h of headers) if (h.key.trim()) hdrs[h.key.trim()] = h.value;
     const expect = expectStatus.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
-    const cfg: any = { enabled, interval_seconds, send_when_degraded, bind_cellular, schedule: sched };
+    const cfg: any = { enabled, interval_seconds, send_when_degraded, egress, schedule: sched };
     if (url.trim()) {
       const req: any = {
         method, url: url.trim(), headers: hdrs,
@@ -239,7 +239,7 @@
   }
   // Re-run whenever any persisted setting changes (listed so Svelte tracks them).
   $: scheduleSave(
-    enabled, interval_seconds, send_when_degraded, bind_cellular, method, url,
+    enabled, interval_seconds, send_when_degraded, egress, method, url,
     timeout_seconds, expectStatus, headers, useRawBody, rawBody, fields, sched,
   );
 
@@ -280,8 +280,18 @@
     <label><input type="checkbox" bind:checked={enabled} /> Enabled</label>
     <label class="muted">interval <input class="ui-input" style="width:80px;display:inline-block" type="number" bind:value={interval_seconds} /> s</label>
     <label><input type="checkbox" bind:checked={send_when_degraded} /> keep sending while degraded</label>
-    <label><input type="checkbox" bind:checked={bind_cellular} /> bind to cellular (uncheck for LAN/VPN endpoint)</label>
+    <label class="muted">send over
+      <select class="ui-select" style="width:auto;display:inline-block" bind:value={egress}>
+        <option value="wlan">Wi-Fi (wlan)</option>
+        <option value="cellular">Cellular (wwan)</option>
+        <option value="auto">Any / OS default (LAN/VPN)</option>
+      </select>
+    </label>
   </div>
+  <p class="muted" style="margin-top:6px">Which interface the heartbeat goes out. <strong>Wi-Fi</strong> (default)
+    keeps heartbeats off your cellular data while still reporting cellular health via <code>{'{'}status{'}'}</code>;
+    <strong>Cellular</strong> makes a successful send prove cellular egress; <strong>Any</strong> lets the OS route it
+    (for a LAN/VPN-only endpoint). If the chosen interface is down, it falls back to OS routing.</p>
 </section>
 
 <section class="ui-card">

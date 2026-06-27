@@ -26,6 +26,7 @@ from sim_monitor.monitor.schedule import is_active
 from sim_monitor.monitor.transport import make_session
 from sim_monitor.storage.db import Database
 from sim_monitor.system.host import collect_host_metrics, collect_interface_ips
+from sim_monitor.system.netifaces import list_up_interfaces
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ class HttpMonitor:
         get_config: Callable[[], MonitorConfig | None],
         trigger: threading.Event,
         wall_clock: Callable[[], datetime] | None = None,
+        list_interfaces: Callable[[], list[str]] = list_up_interfaces,
     ) -> None:
         self.store = store
         self.db = db
@@ -88,8 +90,23 @@ class HttpMonitor:
         # Wall-clock source for schedule windows (injectable for tests); the
         # monotonic clock still drives interval pacing.
         self._wall_clock = wall_clock or (lambda: datetime.now(UTC))
+        # Enumerates up interfaces, to resolve the configured egress (injectable).
+        self.list_interfaces = list_interfaces
         self._next_due: float | None = None
         self._next_public_ip = 0.0
+
+    def _resolve_egress(self, config: MonitorConfig, snapshot) -> str | None:
+        """The interface to bind the heartbeat socket to (None = OS routing).
+        Falls back to OS routing when the requested interface isn't currently up
+        so a missing Wi-Fi link (say) doesn't silently drop every heartbeat."""
+        if config.egress == "cellular":
+            return snapshot.interface if snapshot.state is State.CONNECTED else None
+        if config.egress == "wlan":
+            return next(
+                (n for n in self.list_interfaces() if n.startswith(("wlan", "wlp"))),
+                None,
+            )
+        return None  # "auto" — let the OS pick the route
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -148,19 +165,16 @@ class HttpMonitor:
     def probe(self, config: MonitorConfig) -> bool:
         """Send one heartbeat and record the result. Returns success.
 
-        While CONNECTED the socket is bound to the cellular interface (a
-        success proves cellular egress). Otherwise the request goes out
-        unbound — over ethernet/wifi if available — carrying
-        {status}=degraded so the endpoint learns *why* instead of silence.
+        The socket is bound to the configured egress interface (Wi-Fi by
+        default, or the cellular modem, or unbound for OS routing). The payload's
+        {status} still reflects cellular health regardless of which interface the
+        heartbeat travels over, so you can report cellular state while delivering
+        the report over Wi-Fi to conserve cellular data.
         """
         request = config.request
         assert request is not None
         snapshot = self.store.get()
-        bind_interface = (
-            snapshot.interface
-            if snapshot.state is State.CONNECTED and config.bind_cellular
-            else None
-        )
+        bind_interface = self._resolve_egress(config, snapshot)
         context = snapshot.placeholder_context()
         context.update(collect_host_metrics())
         context.update(collect_interface_ips())

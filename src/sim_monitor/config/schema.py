@@ -132,13 +132,29 @@ class MonitorConfig(StrictModel):
     # cellular is down, so the endpoint sees {status}=degraded instead of
     # silence. When false, probes pause until cellular reconnects.
     send_when_degraded: bool = True
-    # Bind the probe socket to the cellular interface while connected, so a
-    # success PROVES cellular egress. Set false when the endpoint is only
-    # reachable via LAN/VPN (e.g. testing against a local server).
-    bind_cellular: bool = True
+    # Which interface the heartbeat egresses over (bound via SO_BINDTODEVICE):
+    #   "wlan"     — the Wi-Fi interface (default; keeps heartbeats off cellular
+    #                data while still reporting cellular health via {status}).
+    #   "cellular" — the live modem interface, so a success PROVES cellular egress.
+    #   "auto"     — let the OS route it (use when the endpoint is only reachable
+    #                via LAN/VPN, e.g. a local test server).
+    # If the chosen interface isn't currently up, the probe falls back to OS
+    # routing rather than failing outright.
+    egress: Literal["wlan", "cellular", "auto"] = "wlan"
     # Optional weekly window limiting when scheduled probes fire.
     schedule: MonitorSchedule = Field(default_factory=MonitorSchedule)
     request: MonitorRequest | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_bind_cellular(cls, data):
+        # Back-compat: the old boolean `bind_cellular` becomes `egress`
+        # (true -> cellular, false -> auto). Popped so extra="forbid" is happy.
+        if isinstance(data, dict) and "bind_cellular" in data:
+            data = dict(data)
+            legacy = data.pop("bind_cellular")
+            data.setdefault("egress", "cellular" if legacy else "auto")
+        return data
 
     @model_validator(mode="after")
     def _enabled_requires_request(self) -> MonitorConfig:

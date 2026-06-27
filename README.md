@@ -176,17 +176,26 @@ are omitted from structured bodies:
   (host metrics are Linux-only)
 - **Timing:** `{timestamp} {sampled_at}`
 
-**Heartbeats while cellular is down:** probes don't stop when the connection drops.
-While cellular is **up**, the socket is bound to the cellular interface, so a success
-proves cellular egress even with ethernet connected — and `{status}` renders as
-`connected`. While cellular is **down** but the Pi still has another route
-(ethernet/Wi-Fi), probes keep firing unbound over whatever works, with
-`{status}` = `degraded` and `{status_message}` carrying a one-line reason
-(e.g. `recovery in progress: connect failed: ...`, `modem found, waiting for SIM: no SIM
-inserted`). During a fallback test `{status}` is `fallback_test` so you can suppress
-alerts for intentional outages. Uncheck **keep sending while degraded** to restore
-pause-until-reconnected behavior, and uncheck **bind to cellular** when your endpoint is
-only reachable over the LAN/VPN (e.g. testing against a local server).
+**Egress interface (send over):** choose which interface each heartbeat goes out:
+- **Wi-Fi (wlan)** — *default*. Heartbeats travel over Wi-Fi, keeping them off your
+  cellular data — while `{status}` still reports cellular health (the daemon verifies the
+  cellular link independently), so you can monitor cellular but deliver the report over
+  Wi-Fi.
+- **Cellular (wwan)** — bind to the modem interface, so a successful send *proves*
+  cellular egress even with ethernet/Wi-Fi connected.
+- **Any / OS default** — let the OS route it; use when the endpoint is only reachable over
+  LAN/VPN (e.g. a local test server).
+
+If the chosen interface is down, the probe falls back to OS routing rather than dropping
+the heartbeat.
+
+**Heartbeats while cellular is down:** probes don't stop when the connection drops. While
+cellular is **up**, `{status}` renders as `connected`. While cellular is **down** but the
+Pi still has another route, probes keep firing with `{status}` = `degraded` and
+`{status_message}` carrying a one-line reason (e.g. `recovery in progress: connect
+failed: ...`, `modem found, waiting for SIM: no SIM inserted`). During a fallback test
+`{status}` is `fallback_test` so you can suppress alerts for intentional outages. Uncheck
+**keep sending while degraded** to restore pause-until-reconnected behavior.
 
 **Schedule (optional):** limit scheduled heartbeats to a weekly window — pick the days,
 a start/end time, and a timezone (default **Mon–Fri, 9am–6pm, America/New_York**). It's

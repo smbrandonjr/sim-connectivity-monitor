@@ -75,6 +75,7 @@ def env(monkeypatch):
         events=EventLog(db),
         get_config=lambda: PROFILE.monitor,
         trigger=threading.Event(),
+        list_interfaces=lambda: [],  # no Wi-Fi by default (deterministic)
     )
     return monitor, session, db
 
@@ -109,18 +110,42 @@ def test_probe_network_error_recorded(env):
     assert "no route" in result["error"]
 
 
-def test_probe_binds_cellular_while_connected(env):
+def test_egress_cellular_binds_cellular(env):
     monitor, session, _ = env
-    monitor.probe(PROFILE.monitor)
+    cell = PROFILE.monitor.model_copy(deep=True)
+    cell.egress = "cellular"
+    monitor.probe(cell)
     assert session.bound_interfaces == ["wwan0"]
 
 
-def test_bind_cellular_false_for_lan_endpoints(env):
+def test_egress_wlan_binds_wlan(env):
+    monitor, session, _ = env
+    monitor.list_interfaces = lambda: ["eth0", "wlan0", "wwan0"]
+    # PROFILE defaults to egress="wlan"
+    monitor.probe(PROFILE.monitor)
+    assert session.bound_interfaces == ["wlan0"]
+
+
+def test_egress_wlan_falls_back_to_os_routing_when_no_wifi(env):
+    monitor, session, _ = env  # fixture injects no interfaces
+    monitor.probe(PROFILE.monitor)  # egress="wlan", but no wlan present
+    assert session.bound_interfaces == [None]
+
+
+def test_egress_auto_unbound_for_lan_endpoints(env):
     monitor, session, _ = env
     lan = PROFILE.monitor.model_copy(deep=True)
-    lan.bind_cellular = False
+    lan.egress = "auto"
     monitor.probe(lan)
     assert session.bound_interfaces == [None]  # routed normally (LAN reachable)
+
+
+def test_legacy_bind_cellular_migrates_to_egress():
+    from sim_monitor.config.schema import MonitorConfig
+
+    assert MonitorConfig.model_validate({"bind_cellular": True}).egress == "cellular"
+    assert MonitorConfig.model_validate({"bind_cellular": False}).egress == "auto"
+    assert MonitorConfig().egress == "wlan"  # new default
 
 
 STATUS_PROFILE = Profile.model_validate(
