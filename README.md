@@ -160,7 +160,9 @@ are omitted from structured bodies:
 - **Serving cell (when reported):** `{rat} {rsrp} {rsrq} {sinr} {band} {earfcn}
   {cell_id} {tac} {pci} {mcc} {mnc} {operator_numeric} {channel}`
 - **Network:** `{ip_address} {gateway} {public_ip} {interface} {apn}` plus per-interface
-  IPs `{eth0_ip} {wlan0_ip} {wwan0_ip}` (only for interfaces that are up)
+  IPs `{eth0_ip} {wlan0_ip} {wwan0_ip}` (only for interfaces that are up), and
+  `{egress_interface}` — the interface this heartbeat actually bound to (empty when
+  OS-routed), so the endpoint can record which path each heartbeat took
 - **Latency / ping (cellular path, from the ping monitor):** for the most recent cycle
   `{latency_ms} {latency_min_ms} {latency_max_ms} {loss_pct}`, and for each trailing
   window `w` in `1h/3h/6h/24h`: `{latency_<w>} {latency_min_<w>} {latency_max_<w>}

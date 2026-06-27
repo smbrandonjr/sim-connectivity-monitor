@@ -140,6 +140,37 @@ def test_egress_auto_unbound_for_lan_endpoints(env):
     assert session.bound_interfaces == [None]  # routed normally (LAN reachable)
 
 
+EGRESS_PROFILE = Profile.model_validate(
+    {
+        "name": "egress-tagged",
+        "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}],
+        "monitor": {
+            "enabled": True,
+            "egress": "cellular",
+            "request": {
+                "method": "POST",
+                "url": "https://hooks.example.com/hb",
+                "body": '{"path":"{egress_interface}"}',
+            },
+        },
+    }
+)
+
+
+def test_egress_interface_placeholder_in_payload(env):
+    monitor, session, _ = env
+    monitor.probe(EGRESS_PROFILE.monitor)  # egress=cellular -> wwan0
+    assert session.calls[0]["data"].decode() == '{"path":"wwan0"}'
+
+
+def test_egress_interface_empty_when_os_routed(env):
+    monitor, session, _ = env
+    cfg = EGRESS_PROFILE.monitor.model_copy(deep=True)
+    cfg.egress = "auto"  # unbound -> no known interface
+    monitor.probe(cfg)
+    assert session.calls[0]["data"].decode() == '{"path":""}'
+
+
 def test_legacy_bind_cellular_migrates_to_egress():
     from sim_monitor.config.schema import MonitorConfig
 

@@ -398,6 +398,7 @@ def placeholders():
     from sim_monitor.monitor.http_monitor import (
         http_check_placeholder_context,
         latency_placeholder_context,
+        resolve_egress,
     )
     from sim_monitor.system.host import collect_host_metrics, collect_interface_ips
 
@@ -408,6 +409,13 @@ def placeholders():
     ctx.update(collect_interface_ips())
     ctx.update(latency_placeholder_context(app.db, snapshot.interface))
     ctx.update(http_check_placeholder_context(app.db, snapshot.interface))
+    # Preview the interface the heartbeat would bind to, given the saved config.
+    raw = app.db.get_setting("monitor")
+    try:
+        mon_cfg = MonitorConfig.model_validate(raw) if raw else MonitorConfig()
+    except ValidationError:
+        mon_cfg = MonitorConfig()
+    ctx["egress_interface"] = resolve_egress(mon_cfg, snapshot)
     ctx["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     return jsonify(ctx)
 

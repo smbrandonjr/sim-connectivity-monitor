@@ -34,6 +34,22 @@ PUBLIC_IP_URL = "https://api.ipify.org"
 PUBLIC_IP_INTERVAL = 300  # seconds
 
 
+def resolve_egress(
+    config: MonitorConfig, snapshot, list_interfaces: Callable[[], list[str]] = list_up_interfaces
+) -> str | None:
+    """The interface to bind the heartbeat socket to (None = OS routing). Falls
+    back to OS routing when the requested interface isn't currently up, so a
+    missing Wi-Fi link (say) doesn't silently drop every heartbeat. Shared by the
+    monitor (at send time) and the API (for the {egress_interface} preview)."""
+    if config.egress == "cellular":
+        return snapshot.interface if snapshot.state is State.CONNECTED else None
+    if config.egress == "wlan":
+        return next(
+            (n for n in list_interfaces() if n.startswith(("wlan", "wlp"))), None
+        )
+    return None  # "auto" — let the OS pick the route
+
+
 def latency_placeholder_context(db: Database, interface: str | None) -> dict:
     """Cellular latency/loss heartbeat placeholders (latency_ms/loss_pct +
     1h/3h/6h/24h windows) for the given interface, from the last 24h of raw
@@ -96,17 +112,7 @@ class HttpMonitor:
         self._next_public_ip = 0.0
 
     def _resolve_egress(self, config: MonitorConfig, snapshot) -> str | None:
-        """The interface to bind the heartbeat socket to (None = OS routing).
-        Falls back to OS routing when the requested interface isn't currently up
-        so a missing Wi-Fi link (say) doesn't silently drop every heartbeat."""
-        if config.egress == "cellular":
-            return snapshot.interface if snapshot.state is State.CONNECTED else None
-        if config.egress == "wlan":
-            return next(
-                (n for n in self.list_interfaces() if n.startswith(("wlan", "wlp"))),
-                None,
-            )
-        return None  # "auto" — let the OS pick the route
+        return resolve_egress(config, snapshot, self.list_interfaces)
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -180,6 +186,9 @@ class HttpMonitor:
         context.update(collect_interface_ips())
         context.update(latency_placeholder_context(self.db, snapshot.interface))
         context.update(http_check_placeholder_context(self.db, snapshot.interface))
+        # The interface this heartbeat actually bound to (None = OS-routed); lets
+        # the endpoint record which path each heartbeat travelled.
+        context["egress_interface"] = bind_interface
         context["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         # URL + headers are string-templated; the body is either built from
         # structured fields (always-valid JSON) or string-templated for raw use.
