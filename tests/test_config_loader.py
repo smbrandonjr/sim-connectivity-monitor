@@ -137,9 +137,17 @@ class TestProfileSchema:
         with pytest.raises(ValidationError, match="pattern"):
             Profile.model_validate({**VALID_PROFILE, "match": {"iccid_patterns": ["89ab*"]}})
 
-    def test_monitor_enabled_requires_request(self):
-        with pytest.raises(ValidationError, match="request"):
-            Profile.model_validate({**VALID_PROFILE, "monitor": {"enabled": True}})
+    def test_monitor_enabled_without_destinations_is_allowed(self):
+        # Master switch can be on before any destinations are added (no-op).
+        p = Profile.model_validate({**VALID_PROFILE, "monitor": {"enabled": True}})
+        assert p.monitor.enabled and p.monitor.destinations == []
+
+    def test_monitor_destination_requires_url(self):
+        with pytest.raises(ValidationError, match="url"):
+            Profile.model_validate({
+                **VALID_PROFILE,
+                "monitor": {"enabled": True, "destinations": [{"egress": "wlan"}]},
+            })
 
 
 class TestLoadProfiles:

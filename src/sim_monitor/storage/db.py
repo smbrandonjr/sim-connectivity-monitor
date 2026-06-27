@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS monitor_results (
     status_code INTEGER,
     latency_ms REAL,
     ok INTEGER NOT NULL,
-    error TEXT
+    error TEXT,
+    interface TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_ts ON monitor_results(ts);
 CREATE TABLE IF NOT EXISTS urc_log (
@@ -170,6 +171,9 @@ class Database:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(sms)")}
         if "dedup" not in cols:
             self._conn.execute("ALTER TABLE sms ADD COLUMN dedup TEXT")
+        mcols = {r["name"] for r in self._conn.execute("PRAGMA table_info(monitor_results)")}
+        if "interface" not in mcols:
+            self._conn.execute("ALTER TABLE monitor_results ADD COLUMN interface TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -204,12 +208,14 @@ class Database:
         latency_ms: float | None,
         ok: bool,
         error: str | None = None,
+        interface: str | None = None,
     ) -> None:
         with self._lock:
             self._conn.execute(
-                "INSERT INTO monitor_results (ts, url, status_code, latency_ms, ok, error)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (time.time(), url, status_code, latency_ms, int(ok), error),
+                "INSERT INTO monitor_results"
+                " (ts, url, status_code, latency_ms, ok, error, interface)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (time.time(), url, status_code, latency_ms, int(ok), error, interface),
             )
             self._prune("monitor_results")
             self._conn.commit()

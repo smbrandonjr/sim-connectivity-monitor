@@ -59,14 +59,17 @@ routing:
 # {profile_name} {status} {status_message}.
 monitor:
   enabled: false
-  # interval_seconds: 300
-  # send_when_degraded: true   # keep sending over wifi/eth while cellular is down
-  # egress: wlan               # wlan (default) | cellular | auto (OS routes; LAN/VPN)
-  # request:
-  #   method: POST
-  #   url: "https://hooks.example.com/heartbeat"
-  #   headers: { Authorization: "Bearer REPLACE_ME" }
-  #   body: '{"iccid":"{iccid}","status":"{status}","ts":"{timestamp}"}'
+  # send_when_degraded: true   # keep sending while cellular is down
+  # body: '{"iccid":"{iccid}","status":"{status}","ts":"{timestamp}"}'  # shared payload
+  # destinations:              # one shared payload -> each endpoint over its interface
+  #   - egress: cellular       # wlan (default) | cellular | auto (OS routes; LAN/VPN)
+  #     method: POST
+  #     url: "https://hooks.example.com/heartbeat"
+  #     headers: { Authorization: "Bearer REPLACE_ME" }
+  #     interval_seconds: 300
+  #   - egress: wlan           # e.g. also post to a LAN endpoint over Wi-Fi
+  #     url: "http://10.0.0.5/heartbeat"
+  #     interval_seconds: 60
 
 fallback_test:
   airplane_seconds: 900

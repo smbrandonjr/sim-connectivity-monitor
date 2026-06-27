@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 import requests
 
-from sim_monitor.config.schema import MonitorSchedule, Profile
+from sim_monitor.config.schema import MonitorConfig, MonitorSchedule
 from sim_monitor.core.events import EventLog
 from sim_monitor.core.state_store import StateStore
 from sim_monitor.core.states import State
@@ -13,23 +13,31 @@ from sim_monitor.monitor import http_monitor
 from sim_monitor.monitor.http_monitor import HttpMonitor
 from sim_monitor.storage.db import Database
 
-PROFILE = Profile.model_validate(
-    {
-        "name": "monitored",
-        "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}],
-        "monitor": {
-            "enabled": True,
-            "interval_seconds": 60,
-            "request": {
-                "method": "POST",
-                "url": "https://hooks.example.com/hb/{iccid}",
-                "headers": {"X-IMEI": "{imei}"},
-                "body": '{"ip":"{ip_address}"}',
-                "expect_status": [200, 204],
-            },
-        },
+
+def monitor_cfg(*, body=None, body_fields=None, egress="cellular", **dest_over):
+    """Build a one-destination MonitorConfig (shared payload + one endpoint)."""
+    dest = {
+        "egress": egress, "method": "POST",
+        "url": "https://hooks.example.com/hb/{iccid}",
+        "headers": {"X-IMEI": "{imei}"}, "interval_seconds": 60,
+        "expect_status": [200, 204],
     }
-)
+    dest.update(dest_over)
+    cfg: dict = {"enabled": True, "destinations": [dest]}
+    if body_fields is not None:
+        cfg["body_fields"] = body_fields
+    else:
+        cfg["body"] = body if body is not None else '{"ip":"{ip_address}"}'
+    return MonitorConfig.model_validate(cfg)
+
+
+# Default config used by most tests (single cellular destination).
+CFG = monitor_cfg()
+
+
+def fire(monitor, cfg, idx=0):
+    """Send the cfg's destination through probe() (bypassing scheduling)."""
+    return monitor.probe(cfg, cfg.destinations[idx])
 
 
 @dataclass
@@ -73,7 +81,7 @@ def env(monkeypatch):
         store=store,
         db=db,
         events=EventLog(db),
-        get_config=lambda: PROFILE.monitor,
+        get_config=lambda: CFG,
         trigger=threading.Event(),
         list_interfaces=lambda: [],  # no Wi-Fi by default (deterministic)
     )
@@ -82,7 +90,7 @@ def env(monkeypatch):
 
 def test_probe_renders_placeholders_and_records_ok(env):
     monitor, session, db = env
-    assert monitor.probe(PROFILE.monitor) is True
+    assert fire(monitor, CFG) is True
     call = session.calls[0]
     assert call["url"] == "https://hooks.example.com/hb/8944500612345678901"
     assert call["headers"]["X-IMEI"] == "490154203237518"
@@ -90,12 +98,13 @@ def test_probe_renders_placeholders_and_records_ok(env):
     result = db.recent_monitor_results(1)[0]
     assert result["ok"] == 1
     assert result["status_code"] == 200
+    assert result["interface"] == "wwan0"  # egress recorded
 
 
 def test_probe_unexpected_status_recorded_as_failure(env):
     monitor, session, db = env
     session.status_code = 500
-    assert monitor.probe(PROFILE.monitor) is False
+    assert fire(monitor, CFG) is False
     result = db.recent_monitor_results(1)[0]
     assert result["ok"] == 0
     assert "500" in result["error"]
@@ -104,7 +113,7 @@ def test_probe_unexpected_status_recorded_as_failure(env):
 def test_probe_network_error_recorded(env):
     monitor, session, db = env
     session.exc = requests.ConnectionError("no route to host")
-    assert monitor.probe(PROFILE.monitor) is False
+    assert fire(monitor, CFG) is False
     result = db.recent_monitor_results(1)[0]
     assert result["ok"] == 0
     assert "no route" in result["error"]
@@ -112,96 +121,102 @@ def test_probe_network_error_recorded(env):
 
 def test_egress_cellular_binds_cellular(env):
     monitor, session, _ = env
-    cell = PROFILE.monitor.model_copy(deep=True)
-    cell.egress = "cellular"
-    monitor.probe(cell)
+    fire(monitor, monitor_cfg(egress="cellular"))
     assert session.bound_interfaces == ["wwan0"]
 
 
 def test_egress_wlan_binds_wlan(env):
     monitor, session, _ = env
     monitor.list_interfaces = lambda: ["eth0", "wlan0", "wwan0"]
-    # PROFILE defaults to egress="wlan"
-    monitor.probe(PROFILE.monitor)
+    fire(monitor, monitor_cfg(egress="wlan"))
     assert session.bound_interfaces == ["wlan0"]
 
 
 def test_egress_wlan_falls_back_to_os_routing_when_no_wifi(env):
     monitor, session, _ = env  # fixture injects no interfaces
-    monitor.probe(PROFILE.monitor)  # egress="wlan", but no wlan present
+    fire(monitor, monitor_cfg(egress="wlan"))
     assert session.bound_interfaces == [None]
 
 
 def test_egress_auto_unbound_for_lan_endpoints(env):
     monitor, session, _ = env
-    lan = PROFILE.monitor.model_copy(deep=True)
-    lan.egress = "auto"
-    monitor.probe(lan)
-    assert session.bound_interfaces == [None]  # routed normally (LAN reachable)
-
-
-EGRESS_PROFILE = Profile.model_validate(
-    {
-        "name": "egress-tagged",
-        "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}],
-        "monitor": {
-            "enabled": True,
-            "egress": "cellular",
-            "request": {
-                "method": "POST",
-                "url": "https://hooks.example.com/hb",
-                "body": '{"path":"{egress_interface}"}',
-            },
-        },
-    }
-)
+    fire(monitor, monitor_cfg(egress="auto"))
+    assert session.bound_interfaces == [None]
 
 
 def test_egress_interface_placeholder_in_payload(env):
     monitor, session, _ = env
-    monitor.probe(EGRESS_PROFILE.monitor)  # egress=cellular -> wwan0
+    cfg = monitor_cfg(egress="cellular", body='{"path":"{egress_interface}"}')
+    fire(monitor, cfg)
     assert session.calls[0]["data"].decode() == '{"path":"wwan0"}'
 
 
 def test_egress_interface_empty_when_os_routed(env):
     monitor, session, _ = env
-    cfg = EGRESS_PROFILE.monitor.model_copy(deep=True)
-    cfg.egress = "auto"  # unbound -> no known interface
-    monitor.probe(cfg)
+    cfg = monitor_cfg(egress="auto", body='{"path":"{egress_interface}"}')
+    fire(monitor, cfg)
     assert session.calls[0]["data"].decode() == '{"path":""}'
 
 
-def test_legacy_bind_cellular_migrates_to_egress():
-    from sim_monitor.config.schema import MonitorConfig
+def test_multiple_destinations_each_over_its_interface(env):
+    """The shared payload is delivered to each destination over its own egress."""
+    monitor, session, db = env
+    monitor.list_interfaces = lambda: ["wlan0", "wwan0"]
+    cfg = MonitorConfig.model_validate({
+        "enabled": True,
+        "body": '{"path":"{egress_interface}"}',
+        "destinations": [
+            {"egress": "wlan", "url": "http://10.0.0.5/hb", "interval_seconds": 60},
+            {"egress": "cellular", "url": "https://api.example/hb", "interval_seconds": 900},
+        ],
+    })
+    monitor.get_config = lambda: cfg
+    monitor._iteration(forced=True)  # fire both now
+    sent = {c["url"]: c["data"].decode() for c in session.calls}
+    assert sent["http://10.0.0.5/hb"] == '{"path":"wlan0"}'
+    assert sent["https://api.example/hb"] == '{"path":"wwan0"}'
+    assert {r["interface"] for r in db.recent_monitor_results(5)} == {"wlan0", "wwan0"}
 
-    assert MonitorConfig.model_validate({"bind_cellular": True}).egress == "cellular"
-    assert MonitorConfig.model_validate({"bind_cellular": False}).egress == "auto"
-    assert MonitorConfig().egress == "wlan"  # new default
+
+def test_disabled_destination_skipped(env):
+    monitor, session, _ = env
+    cfg = MonitorConfig.model_validate({
+        "enabled": True,
+        "body": "{}",
+        "destinations": [
+            {"egress": "auto", "url": "https://on/", "enabled": True, "interval_seconds": 60},
+            {"egress": "auto", "url": "https://off/", "enabled": False, "interval_seconds": 60},
+        ],
+    })
+    monitor.get_config = lambda: cfg
+    monitor._iteration(forced=True)
+    assert [c["url"] for c in session.calls] == ["https://on/"]
 
 
-STATUS_PROFILE = Profile.model_validate(
-    {
-        "name": "status-monitored",
-        "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}],
-        "monitor": {
-            "enabled": True,
-            "interval_seconds": 60,
-            "request": {
-                "method": "POST",
-                "url": "https://hooks.example.com/hb",
-                "body": '{"status":"{status}","msg":"{status_message}","iccid":"{iccid}"}',
-            },
-        },
-    }
+def test_destination_holds_until_its_interval(env):
+    """A destination fires once, then not again until its interval elapses."""
+    monitor, session, _ = env
+    cfg = monitor_cfg(egress="auto", url="https://x/", interval_seconds=600)
+    monitor.get_config = lambda: cfg
+    monitor._iteration(forced=False)          # first fire
+    assert len(session.calls) == 1
+    monitor._iteration(forced=False)          # immediately again: not due yet
+    assert len(session.calls) == 1
+
+
+STATUS_CFG = monitor_cfg(
+    egress="auto",
+    url="https://hooks.example.com/hb",
+    headers={},
+    body='{"status":"{status}","msg":"{status_message}","iccid":"{iccid}"}',
 )
 
 
 def test_degraded_probe_goes_unbound_with_status_payload(env):
-    monitor, session, db = env
-    # Cellular went down: daemon is in DEGRADED, interface info is stale.
+    monitor, session, _ = env
     monitor.store.set_state(State.DEGRADED, last_error="connection lost")
-    assert monitor.probe(STATUS_PROFILE.monitor) is True
-    assert session.bound_interfaces == [None]  # any working route (eth/wlan)
+    assert fire(monitor, STATUS_CFG) is True
+    assert session.bound_interfaces == [None]  # egress=auto -> any working route
     body = session.calls[0]["data"].decode()
     assert '"status":"degraded"' in body
     assert '"msg":"recovery in progress: connection lost"' in body
@@ -210,31 +225,22 @@ def test_degraded_probe_goes_unbound_with_status_payload(env):
 def test_connected_probe_reports_connected_status(env):
     monitor, session, _ = env
     monitor.store.update(operator="Hologram")
-    monitor.probe(STATUS_PROFILE.monitor)
+    fire(monitor, STATUS_CFG)
     body = session.calls[0]["data"].decode()
     assert '"status":"connected"' in body
     assert "via Hologram" in body
 
 
-FIELDS_PROFILE = Profile.model_validate(
-    {
-        "name": "fields",
-        "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}],
-        "monitor": {
-            "enabled": True,
-            "request": {
-                "method": "POST",
-                "url": "https://hooks.example.com/ingest",
-                "body_fields": [
-                    {"path": "iccid", "value": "iccid"},
-                    {"path": "status", "value": "status"},
-                    {"path": "signal.rssi_dbm", "value": "rssi"},
-                    {"path": "signal.sinr_db", "value": "sinr"},  # unknown -> omitted
-                    {"path": "meta.tags", "value": "warehouse", "kind": "static"},
-                ],
-            },
-        },
-    }
+FIELDS_CFG = monitor_cfg(
+    url="https://hooks.example.com/ingest",
+    headers={},
+    body_fields=[
+        {"path": "iccid", "value": "iccid"},
+        {"path": "status", "value": "status"},
+        {"path": "signal.rssi_dbm", "value": "rssi"},
+        {"path": "signal.sinr_db", "value": "sinr"},  # unknown -> omitted
+        {"path": "meta.tags", "value": "warehouse", "kind": "static"},
+    ],
 )
 
 
@@ -243,7 +249,7 @@ def test_body_fields_produce_valid_typed_json(env):
 
     monitor, session, _ = env
     monitor.store.update(signal_rssi=-67)
-    monitor.probe(FIELDS_PROFILE.monitor)
+    fire(monitor, FIELDS_CFG)
     sent = json.loads(session.calls[0]["data"].decode())
     assert sent["iccid"] == "8944500612345678901"
     assert sent["status"] == "connected"
@@ -278,17 +284,39 @@ def test_public_ip_skipped_when_not_connected(env):
 
 
 def test_send_when_degraded_default_on():
-    assert PROFILE.monitor.send_when_degraded is True
+    assert MonitorConfig().send_when_degraded is True
+
+
+def test_egress_default_is_wlan():
+    d = MonitorConfig.model_validate({"destinations": [{"url": "https://x/"}]}).destinations[0]
+    assert d.egress == "wlan"
+
+
+def test_legacy_single_request_migrates_to_destination():
+    """An old single-endpoint config folds into one destination + shared body."""
+    legacy = MonitorConfig.model_validate({
+        "enabled": True,
+        "interval_seconds": 120,
+        "bind_cellular": True,
+        "request": {
+            "method": "POST", "url": "https://old/hb",
+            "headers": {"A": "b"}, "body": '{"x":1}', "expect_status": [200],
+        },
+    })
+    assert legacy.body == '{"x":1}'
+    assert len(legacy.destinations) == 1
+    d = legacy.destinations[0]
+    assert d.url == "https://old/hb" and d.egress == "cellular"
+    assert d.interval_seconds == 120 and d.expect_status == [200]
 
 
 class TestPause:
     def test_paused_holds_scheduled_sends(self, env):
         monitor, session, _ = env
-        monitor.get_config = lambda: PROFILE.monitor
         monitor.store.update(monitor_paused=True)
         monitor._iteration(forced=False)
         assert session.calls == []
-        assert monitor._next_due is None  # schedule held, fires promptly on resume
+        assert monitor._next_due == {}  # schedule held, fires promptly on resume
 
     def test_manual_send_works_while_paused(self, env):
         monitor, session, _ = env
@@ -310,8 +338,8 @@ class TestSchedule:
     SUN_OUT = datetime(2025, 6, 15, 14, 0, tzinfo=UTC)  # Sun 10:00 EDT
 
     def _scheduled(self, **kw):
-        cfg = PROFILE.monitor.model_copy(deep=True)
-        cfg.schedule = MonitorSchedule(enabled=True, **kw)
+        cfg = CFG.model_copy(deep=True)
+        cfg.destinations[0].schedule = MonitorSchedule(enabled=True, **kw)
         return cfg
 
     def test_scheduled_probe_fires_inside_window(self, env):
@@ -329,7 +357,7 @@ class TestSchedule:
         monitor._wall_clock = lambda: self.SUN_OUT
         monitor._iteration(forced=False)
         assert session.calls == []
-        assert monitor._next_due is None  # schedule held; fires when window opens
+        assert monitor._next_due == {}  # schedule held; fires when window opens
 
     def test_manual_send_bypasses_schedule(self, env):
         monitor, session, _ = env

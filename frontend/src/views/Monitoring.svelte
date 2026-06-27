@@ -5,39 +5,54 @@
   import { toast } from "../lib/toast";
   import { ts } from "../lib/format";
 
-  // top-level config
+  // ── global config ──────────────────────────────────────────────────────────
   let enabled = false;
-  let interval_seconds = 300;
   let send_when_degraded = true;
-  let egress = "wlan"; // "wlan" | "cellular" | "auto"
 
-  // schedule window (limit heartbeats to e.g. Mon-Fri 9-6 Eastern)
   const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const TIMEZONES = [
     "America/New_York", "America/Chicago", "America/Denver",
     "America/Los_Angeles", "America/Phoenix", "America/Anchorage",
     "Pacific/Honolulu", "UTC",
   ];
-  let sched = {
-    enabled: false,
-    timezone: "America/New_York",
-    days: [0, 1, 2, 3, 4],
-    start: "09:00",
-    end: "18:00",
-    override: "auto",
-  };
-  function toggleDay(d: number) {
-    sched.days = sched.days.includes(d)
-      ? sched.days.filter((x) => x !== d)
-      : [...sched.days, d].sort((a, b) => a - b);
-  }
-  let method = "POST";
-  let url = "";
-  let timeout_seconds = 15;
-  let expectStatus = "200, 204";
-  let headers: { key: string; value: string }[] = [];
 
-  // body: structured builder (default) or raw template
+  // ── destinations (each: where + over which interface + on its own cadence) ──
+  type Sched = { enabled: boolean; timezone: string; days: number[]; start: string; end: string; override: string };
+  type Dest = {
+    name: string; enabled: boolean; egress: string; method: string; url: string;
+    headers: { key: string; value: string }[];
+    expectStatus: string; interval_seconds: number; timeout_seconds: number;
+    schedule: Sched; showSched: boolean;
+  };
+  const newSchedule = (): Sched => ({
+    enabled: false, timezone: "America/New_York",
+    days: [0, 1, 2, 3, 4], start: "09:00", end: "18:00", override: "auto",
+  });
+  const newDest = (egress = "wlan"): Dest => ({
+    name: "", enabled: true, egress, method: "POST", url: "", headers: [],
+    expectStatus: "200, 204", interval_seconds: 300, timeout_seconds: 15,
+    schedule: newSchedule(), showSched: false,
+  });
+  let destinations: Dest[] = [];
+
+  function addDest() { destinations = [...destinations, newDest()]; }
+  function removeDest(i: number) { destinations = destinations.filter((_, idx) => idx !== i); }
+  function toggleDay(i: number, d: number) {
+    const days = destinations[i].schedule.days;
+    destinations[i].schedule.days = days.includes(d)
+      ? days.filter((x) => x !== d) : [...days, d].sort((a, b) => a - b);
+    destinations = destinations;
+  }
+  function addHeader(i: number) {
+    destinations[i].headers = [...destinations[i].headers, { key: "", value: "" }];
+    destinations = destinations;
+  }
+  function removeHeader(i: number, hi: number) {
+    destinations[i].headers = destinations[i].headers.filter((_, idx) => idx !== hi);
+    destinations = destinations;
+  }
+
+  // body: structured builder (default) or raw template — SHARED across destinations
   let useRawBody = false;
   let rawBody = "";
   let fields: { path: string; value: string; kind: string }[] = [];
@@ -94,8 +109,7 @@
 
   // Cellular-path stats from the two probe monitors (last cycle + 1h/3h/6h/24h
   // windows), each exposing avg/min/max latency + loss/fail. Generated so the
-  // full set stays selectable here — this catalog is what controls which fields
-  // the heartbeat actually sends. Ping nests under meta.latency.*, web checks
+  // full set stays selectable here. Ping nests under meta.latency.*, web checks
   // under meta.web.*; the `value` is the placeholder key the server fills in.
   function probeFields(prefix: string, group: string, base: string, latWord: string, lossWord: string) {
     const out: { group: string; label: string; path: string; value: string }[] = [];
@@ -141,8 +155,7 @@
   }
   function isCustom(f: { path: string }) { return !CATALOG.some((c) => c.path === f.path); }
 
-  // Live preview mirroring the server's render_body_fields (omit unknowns, keep
-  // types). Passed fields/ph explicitly so Svelte re-runs it on every change.
+  // Live preview mirroring the server's render_body_fields (omit unknowns, keep types).
   function buildPreview(flds: typeof fields, ph: Record<string, any>) {
     const out: any = {};
     for (const f of flds) {
@@ -159,26 +172,26 @@
     return out;
   }
 
-  // Reactive derived state — these recompute whenever `fields`/`phValues` change.
   $: selectedPaths = new Set(fields.map((f) => f.path));
   $: preview = JSON.stringify(buildPreview(fields, phValues), null, 2);
 
   async function load() {
     const c = await api.monitorConfig();
     enabled = !!c.enabled;
-    interval_seconds = c.interval_seconds ?? 300;
     send_when_degraded = c.send_when_degraded ?? true;
-    egress = c.egress ?? "wlan";
-    if (c.schedule) sched = { ...sched, ...c.schedule };
-    const r = c.request ?? {};
-    method = r.method ?? "POST";
-    url = r.url ?? "";
-    timeout_seconds = r.timeout_seconds ?? 15;
-    expectStatus = (r.expect_status ?? [200, 204]).join(", ");
-    headers = Object.entries(r.headers ?? {}).map(([key, value]) => ({ key, value: String(value) }));
-    fields = (r.body_fields ?? []).map((f: any) => ({ ...f }));
-    rawBody = r.body ?? "";
+    fields = (c.body_fields ?? []).map((f: any) => ({ ...f }));
+    rawBody = c.body ?? "";
     useRawBody = !fields.length && !!rawBody;
+    destinations = (c.destinations ?? []).map((d: any) => ({
+      name: d.name ?? "", enabled: d.enabled ?? true, egress: d.egress ?? "wlan",
+      method: d.method ?? "POST", url: d.url ?? "",
+      headers: Object.entries(d.headers ?? {}).map(([key, value]) => ({ key, value: String(value) })),
+      expectStatus: (d.expect_status ?? [200, 204]).join(", "),
+      interval_seconds: d.interval_seconds ?? 300,
+      timeout_seconds: d.timeout_seconds ?? 15,
+      schedule: { ...newSchedule(), ...(d.schedule ?? {}) },
+      showSched: false,
+    }));
     lastSaved = JSON.stringify(buildConfig());  // baseline so auto-save won't re-save on load
     ready = true;
   }
@@ -198,25 +211,32 @@
   $: rangeEnd = Math.min(total, (page + 1) * PAGE_SIZE);
 
   function buildConfig() {
-    const hdrs: Record<string, string> = {};
-    for (const h of headers) if (h.key.trim()) hdrs[h.key.trim()] = h.value;
-    const expect = expectStatus.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
-    const cfg: any = { enabled, interval_seconds, send_when_degraded, egress, schedule: sched };
-    if (url.trim()) {
-      const req: any = {
-        method, url: url.trim(), headers: hdrs,
-        timeout_seconds, expect_status: expect.length ? expect : [200, 204],
-      };
-      if (useRawBody) req.body = rawBody;
-      else req.body_fields = fields;
-      cfg.request = req;
-    }
+    const cfg: any = { enabled, send_when_degraded };
+    if (useRawBody) cfg.body = rawBody;
+    else cfg.body_fields = fields;
+    cfg.destinations = destinations
+      .filter((d) => d.url.trim())  // skip half-typed rows (URL is required)
+      .map((d) => {
+        const hdrs: Record<string, string> = {};
+        for (const h of d.headers) if (h.key.trim()) hdrs[h.key.trim()] = h.value;
+        const expect = d.expectStatus.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
+        const s = d.schedule;
+        return {
+          name: d.name, enabled: d.enabled, egress: d.egress, method: d.method,
+          url: d.url.trim(), headers: hdrs,
+          timeout_seconds: Number(d.timeout_seconds),
+          expect_status: expect.length ? expect : [200, 204],
+          interval_seconds: Number(d.interval_seconds),
+          schedule: {
+            enabled: s.enabled, timezone: s.timezone, days: s.days,
+            start: s.start, end: s.end, override: s.override,
+          },
+        };
+      });
     return cfg;
   }
-  // ── auto-save ──────────────────────────────────────────────────────────────
-  // Settings persist automatically (debounced) once the form has loaded; a
-  // header indicator reports state. `lastSaved` guards against saving the
-  // freshly-loaded config back, and against no-op saves when nothing changed.
+
+  // ── auto-save (debounced) ───────────────────────────────────────────────────
   let ready = false;
   let lastSaved = "";
   let saveState: "idle" | "saving" | "saved" | "error" = "idle";
@@ -226,7 +246,7 @@
     if (!ready) return;
     if (JSON.stringify(buildConfig()) === lastSaved) {
       clearTimeout(saveTimer);
-      return; // reverted to the saved state; nothing to do
+      return;
     }
     saveState = "saving";
     clearTimeout(saveTimer);
@@ -238,17 +258,13 @@
     if (ok) { lastSaved = cur; saveState = "saved"; }
     else { saveState = "error"; }
   }
-  // Re-run whenever any persisted setting changes (listed so Svelte tracks them).
-  $: scheduleSave(
-    enabled, interval_seconds, send_when_degraded, egress, method, url,
-    timeout_seconds, expectStatus, headers, useRawBody, rawBody, fields, sched,
-  );
+  // Binding to destinations[i].* invalidates `destinations`, so nested edits
+  // re-run this and persist.
+  $: scheduleSave(enabled, send_when_degraded, useRawBody, rawBody, fields, destinations);
 
   async function sendNow() {
-    if (await api.cmd("monitor-now")) { toast("heartbeat sent", "ok"); setTimeout(loadHistory, 1500); }
+    if (await api.cmd("monitor-now")) { toast("heartbeats sent", "ok"); setTimeout(loadHistory, 1500); }
   }
-  function addHeader() { headers = [...headers, { key: "", value: "" }]; }
-  function removeHeader(i: number) { headers = headers.filter((_, idx) => idx !== i); }
 
   onMount(() => {
     load(); loadPlaceholders(); loadHistory();
@@ -261,7 +277,7 @@
 <div class="row">
   <h1>Monitoring</h1>
   {#if $status}
-    <span class="badge {$status.monitor_active ? 'green' : 'amber'}" title="Whether a scheduled heartbeat would fire right now">
+    <span class="badge {$status.monitor_active ? 'green' : 'amber'}" title="Whether a heartbeat would fire right now">
       {$status.monitor_active ? "sending now" : "not sending"}
     </span>
   {/if}
@@ -271,87 +287,101 @@
   <button class="ui-btn ui-btn-sm" on:click={sendNow}>Send heartbeat now</button>
 </div>
 <p class="muted" style="margin-top:-4px">Changes save automatically.</p>
-<p class="muted">A global heartbeat sent to your endpoint on a schedule. While connected it goes
-  out the cellular interface (proving cellular egress); if cellular drops it keeps sending over
-  any other route with <code>status=degraded</code>. A profile may override this if it defines
-  its own enabled monitor.</p>
+<p class="muted">One shared payload is delivered to each destination below over its own interface, on its own
+  interval/schedule — e.g. a LAN endpoint over Wi-Fi and a public endpoint over cellular, since neither
+  path can reach the other. <code>{'{'}status{'}'}</code> reports cellular health regardless of the path used.
+  A profile may override this if it defines its own enabled monitor.</p>
 
 <section class="ui-card">
   <div class="row">
     <label><input type="checkbox" bind:checked={enabled} /> Enabled</label>
-    <label class="muted">interval <input class="ui-input" style="width:80px;display:inline-block" type="number" bind:value={interval_seconds} /> s</label>
     <label><input type="checkbox" bind:checked={send_when_degraded} /> keep sending while degraded</label>
-    <label class="muted">send over
-      <select class="ui-select" style="width:auto;display:inline-block" bind:value={egress}>
-        <option value="wlan">Wi-Fi (wlan)</option>
-        <option value="cellular">Cellular (wwan)</option>
-        <option value="auto">Any / OS default (LAN/VPN)</option>
-      </select>
-    </label>
   </div>
-  <p class="muted" style="margin-top:6px">Which interface the heartbeat goes out. <strong>Wi-Fi</strong> (default)
-    keeps heartbeats off your cellular data while still reporting cellular health via <code>{'{'}status{'}'}</code>;
-    <strong>Cellular</strong> makes a successful send prove cellular egress; <strong>Any</strong> lets the OS route it
-    (for a LAN/VPN-only endpoint). If the chosen interface is down, it falls back to OS routing.</p>
 </section>
 
 <section class="ui-card">
   <div class="row">
-    <h2 style="flex:1">Schedule</h2>
-    <label><input type="checkbox" bind:checked={sched.enabled} /> Limit heartbeats to a weekly window</label>
+    <h2 style="flex:1">Destinations</h2>
+    <button class="ui-btn ui-btn-sm" on:click={addDest}><i class="ri-add-line"></i> Add destination</button>
   </div>
-  <p class="muted">Scheduled probes only fire inside this window (manual “Send heartbeat now” always works).
-    Leave unchecked to send around the clock whenever monitoring is enabled.</p>
-  <fieldset class="sched" disabled={!sched.enabled}>
-    <div class="row">
-      <span class="muted">Days</span>
-      {#each DAY_LABELS as d, i}
-        <button type="button" class="chip" class:on={sched.days.includes(i)} on:click={() => toggleDay(i)}>{d}</button>
-      {/each}
-    </div>
-    <div class="row" style="margin-top:10px">
-      <label class="muted">from <input class="ui-input" style="width:120px;display:inline-block" type="time" bind:value={sched.start} /></label>
-      <label class="muted">to <input class="ui-input" style="width:120px;display:inline-block" type="time" bind:value={sched.end} /></label>
-      <label class="muted">timezone
-        <select class="ui-select" style="width:auto;display:inline-block" bind:value={sched.timezone}>
-          {#each TIMEZONES as tz}<option>{tz}</option>{/each}
-          {#if !TIMEZONES.includes(sched.timezone)}<option>{sched.timezone}</option>{/if}
+  {#each destinations as dest, i (i)}
+    <div class="dest" class:off={!dest.enabled}>
+      <div class="row">
+        <label class="toggle" title="enable this destination"><input type="checkbox" bind:checked={destinations[i].enabled} /></label>
+        <input class="ui-input" style="max-width:150px" placeholder="name (optional)" bind:value={destinations[i].name} />
+        <select class="ui-select" style="width:auto" title="interface" bind:value={destinations[i].egress}>
+          <option value="wlan">Wi-Fi</option>
+          <option value="cellular">Cellular</option>
+          <option value="auto">Any</option>
         </select>
-      </label>
-    </div>
-    <p class="muted" style="margin-top:6px">A window ending earlier than it starts (e.g. 22:00→02:00) wraps past midnight.</p>
-  </fieldset>
-  <div class="row" style="margin-top:10px">
-    <span class="muted">Override</span>
-    {#each [["auto", "Follow schedule"], ["on", "Force on"], ["off", "Force off"]] as [val, lbl]}
-      <label><input type="radio" bind:group={sched.override} value={val} /> {lbl}</label>
-    {/each}
-  </div>
-</section>
+        <select class="ui-select" style="width:auto" bind:value={destinations[i].method}>
+          {#each ["POST", "GET", "PUT", "PATCH", "HEAD"] as m}<option>{m}</option>{/each}
+        </select>
+        <input class="ui-input" style="flex:1;min-width:220px" placeholder="https://endpoint/ingest" bind:value={destinations[i].url} />
+        <button class="ui-btn ui-btn-sm ui-btn-danger" title="remove destination" on:click={() => removeDest(i)}>
+          <i class="ri-delete-bin-line"></i>
+        </button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label class="muted">interval <input class="ui-input" style="width:80px;display:inline-block" type="number" min="10" bind:value={destinations[i].interval_seconds} /> s</label>
+        <label class="muted">timeout <input class="ui-input" style="width:64px;display:inline-block" type="number" bind:value={destinations[i].timeout_seconds} /> s</label>
+        <label class="muted">expect <input class="ui-input" style="width:96px;display:inline-block" bind:value={destinations[i].expectStatus} /></label>
+        <span style="flex:1"></span>
+        <button class="ui-btn ui-btn-sm" class:on={destinations[i].showSched}
+          on:click={() => (destinations[i].showSched = !destinations[i].showSched)}>
+          <i class="ri-time-line"></i> {dest.schedule.enabled ? "window" : "24/7"}
+        </button>
+      </div>
 
-<section class="ui-card">
-  <h2>Endpoint</h2>
-  <div class="row">
-    <select class="ui-select" style="width:auto" bind:value={method}>
-      {#each ["POST", "GET", "PUT", "PATCH", "HEAD"] as m}<option>{m}</option>{/each}
-    </select>
-    <input class="ui-input" style="flex:1;min-width:280px" placeholder="https://your-endpoint.example.com/ingest/monitor/TOKEN" bind:value={url} />
-  </div>
+      <div class="hdrs">
+        {#each dest.headers as h, hi}
+          <div class="row" style="margin-bottom:4px">
+            <input class="ui-input" style="max-width:180px" placeholder="Header" bind:value={destinations[i].headers[hi].key} />
+            <input class="ui-input" style="flex:1" placeholder="Value" bind:value={destinations[i].headers[hi].value} />
+            <button class="ui-btn ui-btn-sm ui-btn-danger" on:click={() => removeHeader(i, hi)}>×</button>
+          </div>
+        {/each}
+        <button class="ui-btn ui-btn-sm" on:click={() => addHeader(i)}>+ header</button>
+      </div>
 
-  <h2 style="margin-top:14px">Headers</h2>
-  {#each headers as h, i}
-    <div class="row" style="margin-bottom:6px">
-      <input class="ui-input" style="max-width:200px" placeholder="Header" bind:value={h.key} />
-      <input class="ui-input" style="flex:1" placeholder="Value" bind:value={h.value} />
-      <button class="ui-btn ui-btn-sm ui-btn-danger" on:click={() => removeHeader(i)}>×</button>
+      {#if destinations[i].showSched}
+        <div class="schedwrap">
+          <label class="muted"><input type="checkbox" bind:checked={destinations[i].schedule.enabled} /> Limit to a weekly window</label>
+          <fieldset class="sched" disabled={!destinations[i].schedule.enabled}>
+            <div class="row">
+              <span class="muted">Days</span>
+              {#each DAY_LABELS as d, di}
+                <button type="button" class="chip" class:on={dest.schedule.days.includes(di)} on:click={() => toggleDay(i, di)}>{d}</button>
+              {/each}
+            </div>
+            <div class="row" style="margin-top:8px">
+              <label class="muted">from <input class="ui-input" style="width:120px;display:inline-block" type="time" bind:value={destinations[i].schedule.start} /></label>
+              <label class="muted">to <input class="ui-input" style="width:120px;display:inline-block" type="time" bind:value={destinations[i].schedule.end} /></label>
+              <label class="muted">tz
+                <select class="ui-select" style="width:auto;display:inline-block" bind:value={destinations[i].schedule.timezone}>
+                  {#each TIMEZONES as tz}<option>{tz}</option>{/each}
+                  {#if !TIMEZONES.includes(dest.schedule.timezone)}<option>{dest.schedule.timezone}</option>{/if}
+                </select>
+              </label>
+            </div>
+          </fieldset>
+          <div class="row" style="margin-top:8px">
+            <span class="muted">Override</span>
+            {#each [["auto", "Follow"], ["on", "Force on"], ["off", "Force off"]] as [val, lbl]}
+              <label><input type="radio" bind:group={destinations[i].schedule.override} value={val} /> {lbl}</label>
+            {/each}
+          </div>
+        </div>
+      {/if}
     </div>
+  {:else}
+    <p class="muted">No destinations yet. Add one to start sending heartbeats.</p>
   {/each}
-  <button class="ui-btn ui-btn-sm" on:click={addHeader}>+ header</button>
 </section>
 
 <section class="ui-card">
   <div class="row">
-    <h2 style="flex:1">Payload</h2>
+    <h2 style="flex:1">Payload <span class="muted" style="font-weight:400">(shared by all destinations)</span></h2>
     <label class="muted"><input type="checkbox" bind:checked={useRawBody} /> raw template instead</label>
   </div>
 
@@ -402,11 +432,6 @@
       <div class="code-block" style="margin-top:6px">{preview}</div>
     </details>
   {/if}
-
-  <div class="row" style="margin-top:10px">
-    <label class="muted">timeout <input class="ui-input" style="width:70px;display:inline-block" type="number" bind:value={timeout_seconds} /> s</label>
-    <label class="muted">expect status <input class="ui-input" style="width:120px;display:inline-block" bind:value={expectStatus} /></label>
-  </div>
 </section>
 
 <section class="ui-card">
@@ -419,19 +444,20 @@
     {/if}
   </div>
   <table>
-    <thead><tr><th>Time</th><th>Result</th><th>Status</th><th>Latency</th><th>URL</th><th>Error</th></tr></thead>
+    <thead><tr><th>Time</th><th>Result</th><th>Iface</th><th>Status</th><th>Latency</th><th>URL</th><th>Error</th></tr></thead>
     <tbody>
       {#each history as r}
         <tr>
           <td class="nowrap">{ts(r.ts)}</td>
           <td><span class="badge {r.ok ? 'green' : 'red'}">{r.ok ? "ok" : "FAIL"}</span></td>
+          <td class="mono">{r.interface ?? "—"}</td>
           <td class="mono">{r.status_code ?? "—"}</td>
           <td class="mono">{r.latency_ms != null ? Math.round(r.latency_ms) + " ms" : "—"}</td>
           <td class="break">{r.url}</td>
           <td class="break muted">{r.error ?? ""}</td>
         </tr>
       {:else}
-        <tr><td colspan="6" class="muted">No heartbeats yet.</td></tr>
+        <tr><td colspan="7" class="muted">No heartbeats yet.</td></tr>
       {/each}
     </tbody>
   </table>
@@ -440,6 +466,19 @@
 <style>
   fieldset.sched { border: 0; padding: 0; margin: 0; min-width: 0; }
   fieldset.sched:disabled { opacity: 0.45; }
+
+  .dest {
+    border: 1px solid var(--color-border, #333); border-radius: 8px; padding: 12px;
+    margin-bottom: 10px; background: var(--color-surface-2, rgba(127,127,127,.05));
+  }
+  .dest.off { opacity: 0.6; }
+  .dest .toggle { display: inline-flex; align-items: center; }
+  .hdrs { margin-top: 8px; }
+  .schedwrap {
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--color-border, #2a2a2a);
+    display: flex; flex-direction: column; gap: 8px;
+  }
 
   .save-status { font-size: var(--fs-sm, 13px); min-width: 84px; }
   .save-status.saving { color: var(--color-text-muted); }

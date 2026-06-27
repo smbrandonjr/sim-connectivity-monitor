@@ -100,8 +100,12 @@ def _strip_secrets(profile: dict[str, Any] | None) -> dict[str, Any] | None:
     # Keep the monitor's shape but drop URL/headers/body (may carry tokens).
     monitor = profile.get("monitor")
     if monitor:
+        dests = monitor.get("destinations") or []
         clean["monitor"] = {
             "enabled": monitor.get("enabled"),
-            "interval_seconds": monitor.get("interval_seconds"),
+            "destinations": [
+                {"egress": d.get("egress"), "interval_seconds": d.get("interval_seconds")}
+                for d in dests
+            ],
         }
     return clean

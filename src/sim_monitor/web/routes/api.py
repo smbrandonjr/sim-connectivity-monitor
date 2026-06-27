@@ -41,12 +41,14 @@ def status():
     # render "connected for N" from state_since without clock-skew guessing.
     data["device_uptime_s"] = collect_host_metrics().get("uptime_s")
     data["server_time"] = time.time()
-    # Whether the heartbeat would fire right now: master switch on, an endpoint
-    # configured, and inside the schedule window (override-aware).
+    # Whether any heartbeat would fire right now: master switch on, and at least
+    # one enabled destination inside its schedule window (override-aware).
     cfg = app.daemon.effective_monitor_config()
+    now_utc = datetime.now(UTC)
     data["monitor_active"] = bool(
-        cfg and cfg.enabled and cfg.request is not None
-        and is_active(cfg.schedule, datetime.now(UTC))
+        cfg and cfg.enabled and any(
+            d.enabled and is_active(d.schedule, now_utc) for d in cfg.destinations
+        )
     )
     return jsonify(data)
 
@@ -409,13 +411,15 @@ def placeholders():
     ctx.update(collect_interface_ips())
     ctx.update(latency_placeholder_context(app.db, snapshot.interface))
     ctx.update(http_check_placeholder_context(app.db, snapshot.interface))
-    # Preview the interface the heartbeat would bind to, given the saved config.
+    # Preview the egress interface using the first enabled destination (the
+    # placeholder resolves per-destination at send time).
     raw = app.db.get_setting("monitor")
     try:
         mon_cfg = MonitorConfig.model_validate(raw) if raw else MonitorConfig()
     except ValidationError:
         mon_cfg = MonitorConfig()
-    ctx["egress_interface"] = resolve_egress(mon_cfg, snapshot)
+    dest = next((d for d in mon_cfg.destinations if d.enabled), None)
+    ctx["egress_interface"] = resolve_egress(dest, snapshot) if dest else None
     ctx["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     return jsonify(ctx)
 

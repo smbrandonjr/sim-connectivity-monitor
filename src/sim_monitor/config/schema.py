@@ -78,18 +78,6 @@ class BodyField(StrictModel):
     kind: Literal["placeholder", "static"] = "placeholder"
 
 
-class MonitorRequest(StrictModel):
-    method: Literal["GET", "POST", "PUT", "PATCH", "HEAD"] = "POST"
-    url: str
-    headers: dict[str, str] = Field(default_factory=dict)
-    body: str = ""
-    # Structured body builder (preferred). When non-empty, the JSON body is
-    # assembled from these fields and `body` is ignored.
-    body_fields: list[BodyField] = Field(default_factory=list)
-    timeout_seconds: float = Field(default=15, gt=0, le=300)
-    expect_status: list[int] = Field(default=[200, 204], min_length=1)
-
-
 class MonitorSchedule(StrictModel):
     """Optional weekly time window that gates scheduled heartbeats, so probes
     only fire when someone is watching (e.g. Mon-Fri 9-6 Eastern). The window
@@ -125,42 +113,85 @@ class MonitorSchedule(StrictModel):
         return tz
 
 
-class MonitorConfig(StrictModel):
-    enabled: bool = False
+EgressType = Literal["wlan", "cellular", "auto"]
+
+
+class MonitorDestination(StrictModel):
+    """One heartbeat destination: where to send (URL/method/headers) and over
+    which interface, on its own interval/schedule. The payload is shared across
+    destinations (defined on MonitorConfig) so the same telemetry can be
+    delivered to several endpoints — e.g. a local LAN endpoint over Wi-Fi and a
+    public endpoint over cellular, since neither path can reach the other."""
+
+    name: str = ""  # optional human label, shown in the UI / history
+    enabled: bool = True
+    # Interface to bind the probe socket to (SO_BINDTODEVICE):
+    #   "wlan" = Wi-Fi, "cellular" = the live modem interface, "auto" = OS routing
+    #   (for a LAN/VPN-only endpoint). Falls back to OS routing if it isn't up.
+    egress: EgressType = "wlan"
+    method: Literal["GET", "POST", "PUT", "PATCH", "HEAD"] = "POST"
+    url: str
+    headers: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: float = Field(default=15, gt=0, le=300)
+    expect_status: list[int] = Field(default=[200, 204], min_length=1)
     interval_seconds: int = Field(default=300, ge=10)
+    # Optional weekly window limiting when this destination's probes fire.
+    schedule: MonitorSchedule = Field(default_factory=MonitorSchedule)
+
+
+class MonitorConfig(StrictModel):
+    """Global heartbeat config. The payload (body / body_fields) is shared; each
+    entry in `destinations` delivers it to one endpoint over one interface on its
+    own interval/schedule."""
+
+    enabled: bool = False  # master switch for all destinations
     # Keep heartbeating over any available interface (ethernet/wifi) while
     # cellular is down, so the endpoint sees {status}=degraded instead of
     # silence. When false, probes pause until cellular reconnects.
     send_when_degraded: bool = True
-    # Which interface the heartbeat egresses over (bound via SO_BINDTODEVICE):
-    #   "wlan"     — the Wi-Fi interface (default; keeps heartbeats off cellular
-    #                data while still reporting cellular health via {status}).
-    #   "cellular" — the live modem interface, so a success PROVES cellular egress.
-    #   "auto"     — let the OS route it (use when the endpoint is only reachable
-    #                via LAN/VPN, e.g. a local test server).
-    # If the chosen interface isn't currently up, the probe falls back to OS
-    # routing rather than failing outright.
-    egress: Literal["wlan", "cellular", "auto"] = "wlan"
-    # Optional weekly window limiting when scheduled probes fire.
-    schedule: MonitorSchedule = Field(default_factory=MonitorSchedule)
-    request: MonitorRequest | None = None
+    # Shared payload: a raw template string, or the structured builder
+    # (body_fields, preferred — always-valid JSON). Rendered per destination so
+    # placeholders like {egress_interface} resolve to each one's interface.
+    body: str = ""
+    body_fields: list[BodyField] = Field(default_factory=list)
+    destinations: list[MonitorDestination] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
-    def _migrate_bind_cellular(cls, data):
-        # Back-compat: the old boolean `bind_cellular` becomes `egress`
-        # (true -> cellular, false -> auto). Popped so extra="forbid" is happy.
-        if isinstance(data, dict) and "bind_cellular" in data:
-            data = dict(data)
-            legacy = data.pop("bind_cellular")
-            data.setdefault("egress", "cellular" if legacy else "auto")
+    def _migrate_single_request(cls, data):
+        """Back-compat: fold the old single-endpoint shape (top-level
+        interval_seconds/egress/bind_cellular/schedule + one `request`) into one
+        destination plus the now-shared payload."""
+        if not isinstance(data, dict) or "destinations" in data:
+            return data
+        data = dict(data)
+        req = data.pop("request", None)
+        # Resolve the legacy egress (recent: egress; older: bind_cellular bool).
+        if "egress" in data:
+            egress = data.pop("egress")
+        elif "bind_cellular" in data:
+            egress = "cellular" if data.pop("bind_cellular") else "auto"
+        else:
+            egress = "wlan"
+        interval = data.pop("interval_seconds", 300)
+        schedule = data.pop("schedule", None)
+        if req is not None:
+            req = dict(req)
+            data.setdefault("body", req.get("body", ""))
+            data.setdefault("body_fields", req.get("body_fields", []))
+            if req.get("url"):
+                dest = {
+                    "enabled": True, "egress": egress,
+                    "method": req.get("method", "POST"), "url": req["url"],
+                    "headers": req.get("headers", {}),
+                    "timeout_seconds": req.get("timeout_seconds", 15),
+                    "expect_status": req.get("expect_status", [200, 204]),
+                    "interval_seconds": interval,
+                }
+                if schedule is not None:
+                    dest["schedule"] = schedule
+                data["destinations"] = [dest]
         return data
-
-    @model_validator(mode="after")
-    def _enabled_requires_request(self) -> MonitorConfig:
-        if self.enabled and self.request is None:
-            raise ValueError("monitor.enabled is true but monitor.request is missing")
-        return self
 
 
 class FallbackTestConfig(StrictModel):

@@ -145,10 +145,14 @@ files can hold secrets and live only on the device; never commit them** (gitigno
 
 ## 7. Monitoring (heartbeat)
 
-Heartbeat monitoring is a **global** setting in the web UI's **Monitoring** tab — one
-endpoint for all SIMs, with the recent heartbeat history shown below the form. (A profile
-may override it for one SIM by enabling its own `monitor` block.) Configure the URL,
-method, headers, body, interval, and the egress behavior:
+Heartbeat monitoring is a **global** setting in the web UI's **Monitoring** tab, with the
+recent heartbeat history shown below the form. (A profile may override it for one SIM by
+enabling its own `monitor` block.) It has **one shared payload** delivered to a **list of
+destinations** — each destination has its own endpoint (URL/method/headers), **interface**
+(Wi-Fi / cellular / any), **interval**, and optional **schedule**. This lets you, for
+example, post to a **LAN endpoint over Wi-Fi** and a **public endpoint over cellular** at
+the same time, since neither path can reach the other's endpoint. The history table shows
+which interface each heartbeat used.
 
 Available placeholders (usable in URL, headers, body). Unknown values render empty /
 are omitted from structured bodies:
@@ -178,18 +182,19 @@ are omitted from structured bodies:
   (host metrics are Linux-only)
 - **Timing:** `{timestamp} {sampled_at}`
 
-**Egress interface (send over):** choose which interface each heartbeat goes out:
-- **Wi-Fi (wlan)** — *default*. Heartbeats travel over Wi-Fi, keeping them off your
-  cellular data — while `{status}` still reports cellular health (the daemon verifies the
-  cellular link independently), so you can monitor cellular but deliver the report over
-  Wi-Fi.
-- **Cellular (wwan)** — bind to the modem interface, so a successful send *proves*
-  cellular egress even with ethernet/Wi-Fi connected.
+**Per-destination interface (send over):** each destination picks which interface it goes
+out:
+- **Wi-Fi (wlan)** — *default*. Travels over Wi-Fi, keeping heartbeats off your cellular
+  data — while `{status}` still reports cellular health (the daemon verifies the cellular
+  link independently), so you can monitor cellular but deliver the report over Wi-Fi.
+- **Cellular (wwan)** — bind to the modem interface, so a successful send *proves* cellular
+  egress even with ethernet/Wi-Fi connected.
 - **Any / OS default** — let the OS route it; use when the endpoint is only reachable over
   LAN/VPN (e.g. a local test server).
 
-If the chosen interface is down, the probe falls back to OS routing rather than dropping
-the heartbeat.
+If a destination's interface is down, that probe falls back to OS routing rather than
+dropping the heartbeat. The `{egress_interface}` placeholder records which interface each
+heartbeat actually used.
 
 **Heartbeats while cellular is down:** probes don't stop when the connection drops. While
 cellular is **up**, `{status}` renders as `connected`. While cellular is **down** but the
@@ -199,11 +204,11 @@ failed: ...`, `modem found, waiting for SIM: no SIM inserted`). During a fallbac
 `{status}` is `fallback_test` so you can suppress alerts for intentional outages. Uncheck
 **keep sending while degraded** to restore pause-until-reconnected behavior.
 
-**Schedule (optional):** limit scheduled heartbeats to a weekly window — pick the days,
-a start/end time, and a timezone (default **Mon–Fri, 9am–6pm, America/New_York**). It's
-off by default (send around the clock). A manual **override** can force sending on or off
-regardless of the window, and **Send heartbeat now** always fires. A badge shows whether
-the monitor is sending right now.
+**Schedule (optional, per destination):** each destination can limit its sends to a weekly
+window — pick the days, a start/end time, and a timezone (default **Mon–Fri, 9am–6pm,
+America/New_York**). It's off by default (send around the clock). A manual **override** can
+force that destination on or off regardless of the window, and **Send heartbeat now**
+always fires every destination. A badge shows whether any destination is sending right now.
 
 ## 8. Latency & web-check monitoring
 

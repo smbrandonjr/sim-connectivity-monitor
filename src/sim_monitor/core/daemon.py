@@ -161,7 +161,7 @@ class Daemon:
         global one only when the profile explicitly enables it; otherwise the
         UI-managed global config applies."""
         profile = self.active_profile
-        if profile and profile.monitor.enabled and profile.monitor.request is not None:
+        if profile and profile.monitor.enabled and profile.monitor.destinations:
             return profile.monitor
         return self.global_monitor
 

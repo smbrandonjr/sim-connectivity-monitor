@@ -56,11 +56,13 @@ class TestBuildBundle:
             ],
             "monitor": {
                 "enabled": True,
-                "interval_seconds": 300,
-                "request": {
-                    "url": "https://x/y?token=abc",
-                    "headers": {"Authorization": "Bearer T"},
-                },
+                "body": '{"x":1}',
+                "destinations": [
+                    {
+                        "egress": "cellular", "url": "https://x/y?token=abc",
+                        "headers": {"Authorization": "Bearer T"}, "interval_seconds": 300,
+                    },
+                ],
             },
         }
         bundle = build_bundle(
@@ -69,6 +71,8 @@ class TestBuildBundle:
         )
         ap = bundle["active_profile"]
         assert ap["pdp_contexts"][0]["password"] == "***"
-        # monitor URL/headers/body dropped; only shape kept
-        assert ap["monitor"] == {"enabled": True, "interval_seconds": 300}
-        assert "request" not in ap["monitor"]
+        # monitor URL/headers/body dropped; only shape (egress + interval) kept
+        assert ap["monitor"] == {
+            "enabled": True,
+            "destinations": [{"egress": "cellular", "interval_seconds": 300}],
+        }

@@ -108,11 +108,13 @@ class HttpMonitor:
         self._wall_clock = wall_clock or (lambda: datetime.now(UTC))
         # Enumerates up interfaces, to resolve the configured egress (injectable).
         self.list_interfaces = list_interfaces
-        self._next_due: float | None = None
+        # Per-destination next-due time (monotonic), keyed by a stable dest key.
+        self._next_due: dict[str, float] = {}
         self._next_public_ip = 0.0
 
-    def _resolve_egress(self, config: MonitorConfig, snapshot) -> str | None:
-        return resolve_egress(config, snapshot, self.list_interfaces)
+    @staticmethod
+    def _dest_key(dest) -> str:
+        return f"{dest.egress}|{dest.method}|{dest.url}"
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -143,21 +145,12 @@ class HttpMonitor:
 
     def _iteration(self, forced: bool) -> None:
         config = self.get_config()
-        if config is None or config.request is None:
+        if config is None or not config.destinations:
             if forced:
                 self.db.add_monitor_result(
                     url="", status_code=None, latency_ms=None, ok=False,
                     error="no heartbeat endpoint configured",
                 )
-            return
-        now = time.monotonic()
-        in_window = is_active(config.schedule, self._wall_clock())
-        scheduled = (
-            config.enabled
-            and in_window
-            and (self._next_due is None or now >= self._next_due)
-        )
-        if not (forced or scheduled):
             return
         snapshot = self.store.get()
         if snapshot.monitor_paused and not forced:
@@ -165,43 +158,68 @@ class HttpMonitor:
         connected = snapshot.state is State.CONNECTED
         if not connected and not forced and not config.send_when_degraded:
             return  # don't reschedule; fire as soon as we're connected again
-        self._next_due = now + config.interval_seconds
-        self.probe(config)
+        now = time.monotonic()
+        wall = self._wall_clock()
+        # Decide which destinations are due this tick (each on its own interval +
+        # schedule window), then send the shared payload to each.
+        to_fire = []
+        for dest in config.destinations:
+            if not dest.enabled:
+                continue
+            key = self._dest_key(dest)
+            due = self._next_due.get(key)
+            scheduled = (
+                config.enabled
+                and is_active(dest.schedule, wall)
+                and (due is None or now >= due)
+            )
+            if forced or scheduled:
+                self._next_due[key] = now + dest.interval_seconds
+                to_fire.append(dest)
+        if not to_fire:
+            return
+        context = self._build_context(snapshot)
+        for dest in to_fire:
+            self.probe(config, dest, snapshot, context)
 
-    def probe(self, config: MonitorConfig) -> bool:
-        """Send one heartbeat and record the result. Returns success.
-
-        The socket is bound to the configured egress interface (Wi-Fi by
-        default, or the cellular modem, or unbound for OS routing). The payload's
-        {status} still reflects cellular health regardless of which interface the
-        heartbeat travels over, so you can report cellular state while delivering
-        the report over Wi-Fi to conserve cellular data.
-        """
-        request = config.request
-        assert request is not None
-        snapshot = self.store.get()
-        bind_interface = self._resolve_egress(config, snapshot)
+    def _build_context(self, snapshot) -> dict:
+        """The shared placeholder context for one cycle (everything except the
+        per-destination egress_interface, which probe() stamps in)."""
         context = snapshot.placeholder_context()
         context.update(collect_host_metrics())
         context.update(collect_interface_ips())
         context.update(latency_placeholder_context(self.db, snapshot.interface))
         context.update(http_check_placeholder_context(self.db, snapshot.interface))
+        context["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        return context
+
+    def probe(self, config: MonitorConfig, dest, snapshot=None, context=None) -> bool:
+        """Send one heartbeat to one destination and record the result.
+
+        The payload (config.body / config.body_fields) is shared across all
+        destinations; only the URL/method/headers and the egress interface differ
+        per destination. The socket binds to the destination's egress (Wi-Fi by
+        default, cellular, or unbound). {status} still reflects cellular health
+        regardless of which path the report travels over.
+        """
+        snapshot = snapshot if snapshot is not None else self.store.get()
+        context = dict(context) if context is not None else self._build_context(snapshot)
+        bind_interface = resolve_egress(dest, snapshot, self.list_interfaces)
         # The interface this heartbeat actually bound to (None = OS-routed); lets
         # the endpoint record which path each heartbeat travelled.
         context["egress_interface"] = bind_interface
-        context["sampled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         # URL + headers are string-templated; the body is either built from
         # structured fields (always-valid JSON) or string-templated for raw use.
-        url, _u1 = render(request.url, context)
+        url, _u1 = render(dest.url, context)
         headers, unknown = {}, set()
-        for k, v in request.headers.items():
+        for k, v in dest.headers.items():
             headers[k], u = render(v, context)
             unknown |= u
-        if request.body_fields:
-            body = render_body_fields(request.body_fields, context)
+        if config.body_fields:
+            body = render_body_fields(config.body_fields, context)
             headers.setdefault("Content-Type", "application/json")
         else:
-            body, u = render(request.body, context)
+            body, u = render(config.body, context)
             unknown |= u
         unknown |= _u1
         if unknown:
@@ -211,21 +229,25 @@ class HttpMonitor:
         started = time.monotonic()
         try:
             response = make_session(bind_interface).request(
-                request.method,
+                dest.method,
                 url,
                 headers=headers,
                 data=body.encode("utf-8") if body else None,
-                timeout=request.timeout_seconds,
+                timeout=dest.timeout_seconds,
             )
         except requests.RequestException as e:
             latency = (time.monotonic() - started) * 1000
-            self.db.add_monitor_result(url, None, latency, ok=False, error=str(e))
-            self.events.warning("monitor", f"probe failed: {e}")
+            self.db.add_monitor_result(
+                url, None, latency, ok=False, error=str(e), interface=bind_interface
+            )
+            self.events.warning("monitor", f"probe failed ({url}): {e}")
             return False
         latency = (time.monotonic() - started) * 1000
-        ok = response.status_code in request.expect_status
+        ok = response.status_code in dest.expect_status
         error = None if ok else f"unexpected status {response.status_code}"
-        self.db.add_monitor_result(url, response.status_code, latency, ok=ok, error=error)
+        self.db.add_monitor_result(
+            url, response.status_code, latency, ok=ok, error=error, interface=bind_interface
+        )
         if ok:
             log.info("monitor probe ok: %s %s (%.0f ms)", response.status_code, url, latency)
         else:

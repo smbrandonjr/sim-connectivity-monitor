@@ -433,33 +433,36 @@ class TestMonitorConfigApi:
     def test_set_global_config(self, sim, client):
         cfg = {
             "enabled": True,
-            "interval_seconds": 120,
-            "request": {"method": "POST", "url": "https://hooks.example.com/hb"},
+            "destinations": [
+                {"egress": "wlan", "method": "POST",
+                 "url": "https://hooks.example.com/hb", "interval_seconds": 120},
+            ],
         }
         assert client.put("/api/monitor-config", json=cfg).status_code == 200
         sim.daemon.tick()  # process ReloadMonitorConfig
         eff = sim.daemon.effective_monitor_config()
-        assert eff is not None and eff.enabled and eff.interval_seconds == 120
-        assert client.get("/api/monitor-config.json").get_json()["interval_seconds"] == 120
+        assert eff is not None and eff.enabled
+        assert eff.destinations[0].interval_seconds == 120
+        got = client.get("/api/monitor-config.json").get_json()
+        assert got["destinations"][0]["interval_seconds"] == 120
 
     def test_invalid_config_400(self, sim, client):
-        resp = client.put("/api/monitor-config", json={"enabled": True})  # no request
+        # A destination without a URL is invalid.
+        resp = client.put("/api/monitor-config", json={"destinations": [{"egress": "wlan"}]})
         assert resp.status_code == 400
 
     def test_body_fields_roundtrip(self, sim, client):
         cfg = {
             "enabled": True,
-            "request": {
-                "method": "POST", "url": "https://hooks.example.com/ingest",
-                "body_fields": [
-                    {"path": "iccid", "value": "iccid", "kind": "placeholder"},
-                    {"path": "signal.rsrp_dbm", "value": "rsrp", "kind": "placeholder"},
-                ],
-            },
+            "body_fields": [
+                {"path": "iccid", "value": "iccid", "kind": "placeholder"},
+                {"path": "signal.rsrp_dbm", "value": "rsrp", "kind": "placeholder"},
+            ],
+            "destinations": [{"egress": "wlan", "url": "https://hooks.example.com/ingest"}],
         }
         assert client.put("/api/monitor-config", json=cfg).status_code == 200
         got = client.get("/api/monitor-config.json").get_json()
-        assert got["request"]["body_fields"][1]["path"] == "signal.rsrp_dbm"
+        assert got["body_fields"][1]["path"] == "signal.rsrp_dbm"
 
     def test_placeholders_endpoint(self, sim, client):
         tick_until_connected(sim)
@@ -488,13 +491,14 @@ class TestMonitorConfigApi:
         prof_yaml = (
             "name: ov\nmatch: {iccid_patterns: ['*'], priority: 5}\n"
             "pdp_contexts: [{cid: 1, apn: hologram, bearer: true}]\n"
-            "monitor:\n  enabled: true\n  interval_seconds: 45\n"
-            "  request: {method: POST, url: 'https://p/override'}\n"
+            "monitor:\n  enabled: true\n  destinations:\n"
+            "    - {egress: cellular, method: POST, url: 'https://p/override',\n"
+            "       interval_seconds: 45}\n"
         )
         client.post("/api/profiles", json={"yaml": prof_yaml})
         tick_until_connected(sim)  # active profile becomes 'ov' (priority 5 beats 1000)
         eff = sim.daemon.effective_monitor_config()
-        assert eff is not None and eff.request.url == "https://p/override"
+        assert eff is not None and eff.destinations[0].url == "https://p/override"
 
 
 class TestJsonProfileApi:
