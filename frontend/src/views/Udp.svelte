@@ -6,11 +6,13 @@
   import { ts } from "../lib/format";
 
   let messages: any[] = [];
-  let status: { enabled: boolean; ports: number[]; errors: string[] } | null = null;
+  let status:
+    | { enabled: boolean; egress: string; interface: string | null; ports: number[]; errors: string[] }
+    | null = null;
 
   // ── listener config ───────────────────────────────────────────────────────
   let enabled = false;
-  let bindInterface = "";
+  let egress = "auto";
   let ports: number[] = [];
   let portInput = "";
   let saving = false;
@@ -36,7 +38,7 @@
     try {
       const c = await api.udpConfig();
       enabled = !!c.enabled;
-      bindInterface = c.bind_interface ?? "";
+      egress = c.egress ?? "auto";
       ports = (c.ports ?? []).slice();
       rules = (c.rules ?? []).map((r: any) => ({ ...blankRule(), ...r }));
       status = c.status ?? null;
@@ -73,7 +75,7 @@
     const ok = await api.saveUdpConfig({
       enabled,
       ports,
-      bind_interface: bindInterface.trim(),
+      egress,
       rules: clean,
     });
     saving = false;
@@ -111,7 +113,7 @@
   <h1>UDP</h1>
   {#if status}
     {#if status.enabled && status.ports.length}
-      <span class="badge green">listening: {status.ports.join(", ")}</span>
+      <span class="badge green">listening: {status.ports.join(", ")} on {status.interface ?? "all interfaces"}</span>
     {:else if status.enabled}
       <span class="badge amber">enabled, no ports bound</span>
     {:else}
@@ -152,13 +154,16 @@
 
   <div class="row" style="margin-top:8px">
     <label class="toggle" style="gap:8px">
-      <span>Bind interface</span>
-      <input class="ui-input" style="max-width:160px" placeholder="all interfaces"
-        bind:value={bindInterface} />
+      <span>Listen on</span>
+      <select class="ui-select" style="width:auto" title="interface" bind:value={egress}>
+        <option value="wlan">Wi-Fi</option>
+        <option value="cellular">Cellular</option>
+        <option value="auto">Any</option>
+      </select>
     </label>
     <span class="muted hint" style="flex:1">
-      Optional. Leave blank to listen on all interfaces; set a netdev (e.g. wwan0)
-      to bind via SO_BINDTODEVICE (Linux + root).
+      Which interface to bind to (SO_BINDTODEVICE). "Any" listens on all
+      interfaces; falls back to all if the chosen one isn't up.
     </span>
   </div>
 </section>

@@ -347,9 +347,11 @@ class UdpListenerConfig(StrictModel):
 
     enabled: bool = False
     ports: list[int] = Field(default_factory=list)
-    # "" = bind all interfaces (0.0.0.0). A non-empty interface name binds the
-    # listening sockets to that netdev via SO_BINDTODEVICE (Linux + root only).
-    bind_interface: str = ""
+    # Which interface to bind the listening sockets to (SO_BINDTODEVICE):
+    #   "wlan" = Wi-Fi, "cellular" = the live modem interface, "auto" = all
+    #   interfaces (0.0.0.0). Mirrors the heartbeat destination egress selector.
+    #   Falls back to all interfaces if the chosen one isn't up.
+    egress: EgressType = "auto"
     rules: list[UdpReplyRule] = Field(default_factory=list)
 
     @model_validator(mode="after")

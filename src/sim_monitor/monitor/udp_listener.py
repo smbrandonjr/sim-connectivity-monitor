@@ -25,8 +25,10 @@ from sim_monitor.config.schema import UdpListenerConfig
 from sim_monitor.core.events import EventLog
 from sim_monitor.core.state_store import StateStore
 from sim_monitor.core.udp_reply import find_reply
+from sim_monitor.monitor.http_monitor import resolve_egress
 from sim_monitor.monitor.transport import SO_BINDTODEVICE
 from sim_monitor.storage.db import Database
+from sim_monitor.system.netifaces import list_up_interfaces
 
 log = logging.getLogger(__name__)
 
@@ -60,12 +62,14 @@ class UdpListener:
         events: EventLog,
         get_config: Callable[[], UdpListenerConfig],
         monotonic: Callable[[], float] = time.monotonic,
+        list_interfaces: Callable[[], list[str]] = list_up_interfaces,
     ) -> None:
         self.store = store
         self.db = db
         self.events = events
         self.get_config = get_config
         self._monotonic = monotonic
+        self.list_interfaces = list_interfaces
         self._sockets: dict[int, socket.socket] = {}
         # (enabled, ports, bind_interface) of the currently-bound sockets.
         self._bound_key: tuple | None = None
@@ -91,8 +95,13 @@ class UdpListener:
 
     # ── socket lifecycle ─────────────────────────────────────────────────
     def _sync(self, selector: selectors.BaseSelector, config: UdpListenerConfig) -> None:
-        """(Re)bind sockets to match config. No-op when nothing relevant changed."""
-        key = (config.enabled, tuple(config.ports), config.bind_interface)
+        """(Re)bind sockets to match config. No-op when nothing relevant changed.
+
+        The configured egress (wlan/cellular/auto) is resolved to a live netdev
+        each call, so the sockets rebind automatically when the cellular interface
+        comes up or its name changes."""
+        interface = resolve_egress(config, self.store.get(), self.list_interfaces)
+        key = (config.enabled, tuple(config.ports), config.egress, interface)
         if key == self._bound_key:
             return
         self._close_all(selector)
@@ -101,7 +110,7 @@ class UdpListener:
         if config.enabled:
             for port in config.ports:
                 try:
-                    sock = self._open_socket(port, config.bind_interface)
+                    sock = self._open_socket(port, interface)
                 except OSError as e:
                     errors.append(f"{port}: {e}")
                     self.events.warning("udp", f"could not bind UDP port {port}: {e}")
@@ -110,15 +119,18 @@ class UdpListener:
                 selector.register(sock, selectors.EVENT_READ, port)
                 bound.append(port)
             if bound:
-                where = config.bind_interface or "all interfaces"
+                where = interface or "all interfaces"
                 self.events.info("udp", f"listening on UDP port(s) {bound} ({where})")
         self.db.set_setting(
             "udp_status",
-            {"enabled": config.enabled, "ports": bound, "errors": errors},
+            {
+                "enabled": config.enabled, "egress": config.egress,
+                "interface": interface, "ports": bound, "errors": errors,
+            },
         )
         self._bound_key = key
 
-    def _open_socket(self, port: int, interface: str) -> socket.socket:
+    def _open_socket(self, port: int, interface: str | None) -> socket.socket:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if interface and sys.platform.startswith("linux"):
