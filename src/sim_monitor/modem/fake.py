@@ -44,6 +44,11 @@ class FakeModemDriver(ModemDriver):
         # Scripting hooks
         self.fail_all = False  # every call raises ModemError (port wedged)
         self.fallback_iccid: str | None = None  # applied when airplane mode ends
+        # set_airplane(False) raises this many times before succeeding (models a
+        # dropped reply on radio re-enable); get_sim_status reports absent this
+        # many times before the SIM session re-initializes after CFUN=1.
+        self.airplane_off_failures = 0
+        self.sim_ready_after = 0
         self.at_log: list[str] = []  # records init commands and resets
         self.event_reporting_enabled = False
         self._pending_urcs: list[UrcEvent] = []
@@ -69,6 +74,9 @@ class FakeModemDriver(ModemDriver):
 
     def get_sim_status(self) -> SimStatus:
         self._check()
+        if self.sim_ready_after > 0:
+            self.sim_ready_after -= 1
+            return SimStatus(present=False, detail="SIM busy")
         if not self.sim_present or self.needs_reprobe:
             return SimStatus(present=False, detail="no SIM inserted")
         return SimStatus(present=True, iccid=self.iccid, imsi=self.imsi)
@@ -117,6 +125,9 @@ class FakeModemDriver(ModemDriver):
 
     def set_airplane(self, on: bool) -> None:
         self._check()
+        if not on and self.airplane_off_failures > 0:
+            self.airplane_off_failures -= 1
+            raise ModemError("simulated radio re-enable failure")
         leaving = self.airplane and not on
         self.airplane = on
         if leaving and self.fallback_iccid:

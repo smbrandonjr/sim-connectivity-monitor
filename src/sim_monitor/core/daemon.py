@@ -17,6 +17,7 @@ from sim_monitor.config.loader import load_profiles
 from sim_monitor.config.matcher import match_profile
 from sim_monitor.config.schema import (
     AppConfig,
+    FallbackTestConfig,
     MonitorConfig,
     Profile,
     SmsAutoReplyConfig,
@@ -40,6 +41,7 @@ from sim_monitor.modem.driver_base import (
     ModemDetector,
     ModemDriver,
     ModemError,
+    SimStatus,
 )
 from sim_monitor.modem.pdp_reconcile import DefineContext, DeleteContext, reconcile
 from sim_monitor.system.backend import BackendError, NetworkBackend
@@ -48,6 +50,20 @@ from sim_monitor.system.sdnotify import SdNotifier
 log = logging.getLogger(__name__)
 
 S = State  # short alias for the state handlers
+
+# Commands that drive the modem's AT port or reset the connection. Honoring any
+# of them during a fallback test would fight the airplane-mode window — e.g. a
+# ResetModem issues AT+CFUN=1,1 and silently cancels the test, a Probe/SetAtPort
+# reopens the serial handle, SendSms/SetRat push AT at a radio that's off — so
+# they're refused while FALLBACK_TEST is active (AbortFallbackTest still works).
+_FALLBACK_TEST_BLOCKED = (
+    cmd.ResetModem,
+    cmd.RunDiagnostics,
+    cmd.SendSms,
+    cmd.SetRat,
+    cmd.ProbeAtPort,
+    cmd.SetAtPort,
+)
 
 # Last-ditch catch-all used when the matched profile can't connect after the
 # recovery ladder is exhausted (daemon.fallback_to_default_profile). A plain
@@ -84,6 +100,7 @@ class Daemon:
         db,
         clock=time.monotonic,
         notifier: SdNotifier | None = None,
+        sleep=time.sleep,
     ) -> None:
         self.config = config
         self.profiles = profiles
@@ -95,6 +112,7 @@ class Daemon:
         self.db = db
         self.clock = clock
         self.notifier = notifier
+        self.sleep = sleep
         self.supervisor = Supervisor()
         self.monitor_trigger = threading.Event()  # RunMonitorNow -> monitor thread
 
@@ -227,6 +245,12 @@ class Daemon:
     # ------------------------------------------------------------- commands
 
     def _handle_command(self, command) -> None:
+        if self.state is S.FALLBACK_TEST and isinstance(command, _FALLBACK_TEST_BLOCKED):
+            self.events.warning(
+                "command",
+                f"{type(command).__name__} ignored during fallback test",
+            )
+            return
         match command:
             case cmd.Reconnect():
                 self.events.info("command", "manual reconnect requested")
@@ -979,23 +1003,34 @@ class Daemon:
             ),
         )
 
+    # One settle poll between AT+CFUN=1 and trusting the SIM read.
+    _SETTLE_POLL_SECONDS = 1.0
+
     def _end_fallback_test(self) -> None:
         assert self.driver is not None
         self._fallback_until = None
-        try:
-            self.driver.set_airplane(False)
-            sim = self.driver.get_sim_status()
-        except ModemError as e:
+        settle = (
+            self.active_profile.fallback_test.settle_seconds
+            if self.active_profile
+            else FallbackTestConfig().settle_seconds
+        )
+        if not self._reenable_radio():
             self.store.update(fallback=FallbackStatus())
-            self._fail(f"failed to exit airplane mode: {e}")
+            self._fail("failed to exit airplane mode; radio may still be off")
             return
+        sim = self._read_sim_after_radio_on(settle)
         before = self.store.get().fallback.iccid_before
         if sim.present and sim.iccid != before:
             self.events.info(
                 "fallback", f"SIM profile switched: {before} -> {sim.iccid}"
             )
-        else:
+        elif sim.present:
             self.events.info("fallback", f"SIM profile unchanged ({sim.iccid})")
+        else:
+            self.events.warning(
+                "fallback",
+                f"SIM not ready after re-enabling radio ({sim.detail or 'absent'})",
+            )
         self.active_profile = None
         self._go(
             S.SIM_READY if sim.present else S.MODEM_FOUND,
@@ -1005,6 +1040,48 @@ class Daemon:
             active_profile=None,
             fallback=FallbackStatus(),
         )
+
+    def _reenable_radio(self, attempts: int = 3) -> bool:
+        """Re-assert AT+CFUN=1 until it sticks. A single dropped reply on radio
+        re-enable would otherwise strand the modem with its RF off and hand the
+        cleanup to the recovery ladder, which starts with a plain reconnect and
+        never touches CFUN — so it would churn until it escalated to a reset."""
+        last: ModemError | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                self.driver.set_airplane(False)
+                return True
+            except ModemError as e:
+                last = e
+                self.events.warning(
+                    "fallback",
+                    f"radio re-enable failed (attempt {attempt}/{attempts}): {e}",
+                )
+                if self.notifier:
+                    self.notifier.watchdog()
+                if attempt < attempts:
+                    self.sleep(self._SETTLE_POLL_SECONDS)
+        self.events.error("fallback", f"radio re-enable gave up: {last}")
+        return False
+
+    def _read_sim_after_radio_on(self, settle_seconds: float) -> SimStatus:
+        """Read the SIM after CFUN=1, tolerating the transient 'not ready' gap.
+        While the SIM session re-initializes, AT+CPIN? can answer SIM BUSY /
+        not-ready, which get_sim_status reports as absent. We settle and retry
+        so the post-test ICCID — the whole reason the test runs — is trusted."""
+        polls = max(1, round(settle_seconds / self._SETTLE_POLL_SECONDS))
+        sim = SimStatus(present=False)
+        for _ in range(polls):
+            self.sleep(self._SETTLE_POLL_SECONDS)
+            if self.notifier:
+                self.notifier.watchdog()
+            try:
+                sim = self.driver.get_sim_status()
+            except ModemError as e:
+                sim = SimStatus(present=False, detail=str(e))
+            if sim.present:
+                break
+        return sim
 
     # -------------------------------------------------------------- helpers
 

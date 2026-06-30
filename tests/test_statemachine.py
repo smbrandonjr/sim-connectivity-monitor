@@ -60,6 +60,7 @@ class Harness:
             events=self.events,
             db=self.db,
             clock=lambda: self.t,
+            sleep=lambda _s: None,  # settle/retry waits are instant in tests
         )
 
     def tick(self, n=1, advance=0.0):
@@ -788,6 +789,60 @@ class TestFallbackTest:
         harness.queue.put(cmd.StartFallbackTest(duration_seconds=60))
         harness.tick()
         assert harness.daemon.state is not State.FALLBACK_TEST
+
+    def test_modem_commands_blocked_during_fallback(self, harness):
+        harness.run_until(State.CONNECTED)
+        harness.queue.put(cmd.StartFallbackTest(duration_seconds=600))
+        harness.tick()
+        assert harness.daemon.state is State.FALLBACK_TEST
+        # A reset would issue AT+CFUN=1,1 and silently cancel the test; SetRat
+        # would push AT at a radio that's off. Both must be refused.
+        harness.queue.put(cmd.ResetModem())
+        harness.queue.put(cmd.SetRat("lte"))
+        harness.tick()
+        assert harness.daemon.state is State.FALLBACK_TEST
+        assert harness.driver.airplane is True
+        assert "RESET" not in harness.driver.at_log
+        assert not any(e.startswith("SET_RAT") for e in harness.driver.at_log)
+        msgs = [e["message"] for e in harness.db.recent_events(500)]
+        assert any("ignored during fallback test" in m for m in msgs)
+
+    def test_radio_reenable_retried_after_dropped_reply(self, tmp_path):
+        h = Harness(tmp_path, profiles=[DEFAULT_PROFILE, FALLBACK_PROFILE])
+        h.run_until(State.CONNECTED)
+        h.driver.airplane_off_failures = 2  # first two CFUN=1 attempts fail
+        h.queue.put(cmd.StartFallbackTest(duration_seconds=60))
+        h.tick()
+        h.tick(advance=61)  # window elapsed -> end_fallback_test retries CFUN=1
+        assert h.driver.airplane is False  # third attempt stuck
+        h.run_until(State.CONNECTED)
+
+    def test_radio_reenable_gives_up_to_degraded(self, tmp_path):
+        h = Harness(tmp_path, profiles=[DEFAULT_PROFILE, FALLBACK_PROFILE])
+        h.run_until(State.CONNECTED)
+        h.driver.airplane_off_failures = 99  # CFUN=1 never succeeds
+        h.queue.put(cmd.StartFallbackTest(duration_seconds=60))
+        h.tick()
+        h.tick(advance=61)
+        assert h.daemon.state is State.DEGRADED
+        assert h.driver.airplane is True  # radio left off, flagged for recovery
+        msgs = [e["message"] for e in h.db.recent_events(500)]
+        assert any("radio re-enable gave up" in m for m in msgs)
+
+    def test_sim_read_tolerates_post_radio_settle(self, tmp_path):
+        h = Harness(tmp_path, profiles=[DEFAULT_PROFILE, FALLBACK_PROFILE])
+        h.run_until(State.CONNECTED)
+        h.driver.fallback_iccid = FALLBACK_ICCID
+        h.driver.sim_ready_after = 2  # SIM reports busy on the first two reads
+        h.queue.put(cmd.StartFallbackTest(duration_seconds=60))
+        h.tick()
+        h.tick(advance=61)
+        # The transient "busy" must not be mistaken for an absent SIM.
+        assert h.daemon.state is not State.MODEM_FOUND
+        h.run_until(State.CONNECTED)
+        snap = h.store.get()
+        assert snap.iccid == FALLBACK_ICCID
+        assert snap.active_profile == "fallback-sims"
 
 
 class TestCommands:

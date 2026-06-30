@@ -196,6 +196,11 @@ class MonitorConfig(StrictModel):
 
 class FallbackTestConfig(StrictModel):
     airplane_seconds: int = Field(default=900, ge=10, le=7200)
+    # After re-enabling the radio (AT+CFUN=1) the SIM session re-initializes and
+    # AT+CPIN? can briefly answer "not ready". We poll for up to this long before
+    # trusting the post-test SIM read, so a transient busy isn't mistaken for a
+    # missing SIM / unchanged profile.
+    settle_seconds: int = Field(default=5, ge=0, le=60)
 
 
 class LatencyConfig(StrictModel):
