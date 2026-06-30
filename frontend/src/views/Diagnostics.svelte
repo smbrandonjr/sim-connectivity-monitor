@@ -143,10 +143,14 @@
   <section class="ui-card">
     <h2>Results — {ts(report.ran_at)}</h2>
     {#if report.note}<p style="color:var(--status-red)">{report.note}</p>{/if}
-    <div class="code-block">{#each report.entries as e}&gt; {e.command}
-{e.output}
-
-{/each}</div>
+    <div class="at-log">
+      {#each report.entries as e}
+        <div class="at-entry" class:err={!e.ok}>
+          <div class="at-cmd"><span class="at-prompt">&gt;</span> {e.command}{#if !e.ok}<span class="at-tag">ERROR</span>{/if}</div>
+          <pre class="at-out">{e.output}</pre>
+        </div>
+      {/each}
+    </div>
   </section>
 {/if}
 
@@ -169,3 +173,28 @@
     </table>
   {/each}
 </section>
+
+<style>
+  .at-log { display: flex; flex-direction: column; gap: 6px; }
+  .at-entry {
+    background: #0a0d18; border: 1px solid var(--color-border-default);
+    border-left: 3px solid var(--color-border-strong, var(--color-border-default));
+    padding: 7px 12px;
+  }
+  :global([data-theme="light"]) .at-entry { background: #f4f6fa; }
+  .at-entry.err { border-left-color: var(--status-red); }
+  .at-cmd {
+    font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
+    color: var(--color-text-primary); display: flex; align-items: center; gap: 8px;
+  }
+  .at-prompt { color: var(--status-green); }
+  .at-tag {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .04em; padding: 1px 5px;
+    color: var(--status-red); border: 1px solid var(--status-red); border-radius: 3px;
+  }
+  .at-out {
+    margin: 3px 0 0; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word; color: var(--color-text-muted);
+  }
+  .at-entry.err .at-out { color: var(--status-red); }
+</style>
