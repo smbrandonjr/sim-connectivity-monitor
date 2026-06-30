@@ -8,8 +8,7 @@
   import ConfirmModal from "./lib/ConfirmModal.svelte";
   import Dashboard from "./views/Dashboard.svelte";
   import Profiles from "./views/Profiles.svelte";
-  import Messages from "./views/Messages.svelte";
-  import Udp from "./views/Udp.svelte";
+  import Messaging from "./views/Messaging.svelte";
   import Timeline from "./views/Timeline.svelte";
   import Diagnostics from "./views/Diagnostics.svelte";
   import Monitoring from "./views/Monitoring.svelte";
@@ -19,8 +18,7 @@
   const TABS = [
     { id: "dashboard", label: "Dashboard", icon: "dashboard-line", view: Dashboard },
     { id: "profiles", label: "Profiles", icon: "settings-3-line", view: Profiles },
-    { id: "messages", label: "Messages", icon: "message-2-line", view: Messages },
-    { id: "udp", label: "UDP", icon: "broadcast-line", view: Udp },
+    { id: "messaging", label: "Messaging", icon: "message-2-line", view: Messaging },
     { id: "monitoring", label: "Monitoring", icon: "heart-pulse-line", view: Monitoring },
     { id: "latency", label: "Latency", icon: "pulse-line", view: Latency },
     { id: "scan", label: "Scan", icon: "radar-line", view: Scan },
@@ -43,7 +41,9 @@
   }
 
   function applyHash() {
-    const id = location.hash.replace(/^#\/?/, "") || "dashboard";
+    // Route on the first hash segment only, so sub-routes like
+    // #/messaging/udp still resolve to the "messaging" top-level tab.
+    const id = (location.hash.replace(/^#\/?/, "") || "dashboard").split("/")[0];
     route = TABS.some((t) => t.id === id) ? id : "dashboard";
   }
 
@@ -64,17 +64,24 @@
   });
 
   $: current = TABS.find((t) => t.id === route) ?? TABS[0];
-  $: smsCount = $status?.sms_unread ?? 0;
+  // Combined unread across all messaging channels for the nav badge.
+  $: msgCount =
+    ($status?.sms_unread ?? 0) + ($status?.udp_unread ?? 0) + ($status?.tcp_unread ?? 0);
 
-  // Surface new SMS from anywhere with a toast (the nav badge shows the count).
-  let prevUnread = -1;
-  $: {
-    const u = $status?.sms_unread ?? 0;
-    if (prevUnread >= 0 && u > prevUnread) {
-      toast(`${u - prevUnread} new SMS — see Messages`, "info");
+  // Surface new messages on any channel with a toast (nav badge shows the count),
+  // so the user is alerted even when they're not on that channel's view.
+  let prevSms = -1;
+  let prevUdp = -1;
+  let prevTcp = -1;
+  function alertNew(label: string, prev: number, cur: number): number {
+    if (prev >= 0 && cur > prev) {
+      toast(`${cur - prev} new ${label} message${cur - prev > 1 ? "s" : ""} — see Messaging`, "info");
     }
-    prevUnread = u;
+    return cur;
   }
+  $: prevSms = alertNew("SMS", prevSms, $status?.sms_unread ?? 0);
+  $: prevUdp = alertNew("UDP", prevUdp, $status?.udp_unread ?? 0);
+  $: prevTcp = alertNew("TCP", prevTcp, $status?.tcp_unread ?? 0);
 </script>
 
 <svelte:head>
@@ -107,7 +114,7 @@
   {#each TABS as t}
     <button class="nav-tab" class:active={route === t.id} on:click={() => go(t.id)}>
       <i class="ri-{t.icon}"></i>{t.label}
-      {#if t.id === "messages" && smsCount > 0}<span class="badge lime">{smsCount}</span>{/if}
+      {#if t.id === "messaging" && msgCount > 0}<span class="badge lime">{msgCount}</span>{/if}
     </button>
   {/each}
   <span class="nav-spacer"></span>

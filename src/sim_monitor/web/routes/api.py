@@ -14,6 +14,7 @@ from sim_monitor.config.schema import (
     MonitorConfig,
     Profile,
     SmsAutoReplyConfig,
+    TcpListenerConfig,
     UdpListenerConfig,
 )
 from sim_monitor.core import commands as cmd
@@ -46,6 +47,10 @@ def status():
     # render "connected for N" from state_since without clock-skew guessing.
     data["device_uptime_s"] = collect_host_metrics().get("uptime_s")
     data["server_time"] = time.time()
+    # Unread counts for the off-channel arrival badges/toasts (computed at request
+    # time, like last_monitor above). SMS rides on the snapshot via sms_unread.
+    data["udp_unread"] = app.db.count_unread_udp()
+    data["tcp_unread"] = app.db.count_unread_tcp()
     # Whether any heartbeat would fire right now: master switch on, and at least
     # one enabled destination inside its schedule window (override-aware).
     cfg = app.daemon.effective_monitor_config()
@@ -229,14 +234,41 @@ def urcs():
     return jsonify(sim().db.recent_urcs(limit=300))
 
 
+def _page_args() -> tuple[int, int]:
+    """(limit, offset) from query args, clamped like the monitor history route."""
+    limit = max(1, min(request.args.get("limit", 25, type=int), 200))
+    offset = max(0, request.args.get("offset", 0, type=int))
+    return limit, offset
+
+
 @bp.get("/sms.json")
 def sms():
-    return jsonify(sim().db.recent_sms(limit=200))
+    db = sim().db
+    limit, offset = _page_args()
+    return jsonify({
+        "results": db.recent_sms(limit=limit, offset=offset),
+        "total": db.count_sms(), "limit": limit, "offset": offset,
+    })
 
 
 @bp.get("/udp.json")
 def udp_messages():
-    return jsonify(sim().db.recent_udp_messages(limit=200))
+    db = sim().db
+    limit, offset = _page_args()
+    return jsonify({
+        "results": db.recent_udp_messages(limit=limit, offset=offset),
+        "total": db.count_udp_messages(), "limit": limit, "offset": offset,
+    })
+
+
+@bp.get("/tcp.json")
+def tcp_messages():
+    db = sim().db
+    limit, offset = _page_args()
+    return jsonify({
+        "results": db.recent_tcp_messages(limit=limit, offset=offset),
+        "total": db.count_tcp_messages(), "limit": limit, "offset": offset,
+    })
 
 
 @bp.get("/telemetry.json")
@@ -567,6 +599,65 @@ def udp_config_put():
 @bp.post("/udp/clear")
 def udp_clear():
     sim().db.clear_udp_messages()
+    return jsonify({"ok": True})
+
+
+@bp.post("/udp/delete")
+def udp_delete():
+    sim().db.delete_udp_message(int(_body()["id"]))
+    return jsonify({"ok": True})
+
+
+@bp.post("/udp/mark-read")
+def udp_mark_read():
+    sim().db.mark_udp_read()
+    return jsonify({"ok": True})
+
+
+@bp.get("/tcp-config.json")
+def tcp_config_get():
+    """The UI-managed TCP listener/responder config (device DB; never committed).
+    Returns the saved config, or an empty disabled default when none is set yet.
+    Includes the listener's last-known runtime status under 'status'."""
+    app = sim()
+    raw = app.db.get_setting("tcp_listener")
+    config = raw or TcpListenerConfig().model_dump(mode="json")
+    return jsonify({**config, "status": app.db.get_setting("tcp_status")})
+
+
+@bp.put("/tcp-config")
+def tcp_config_put():
+    body = _body()
+    body.pop("status", None)  # tolerate the read-only status field round-tripping back
+    try:
+        config = TcpListenerConfig.model_validate(body)
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    app = sim()
+    app.db.set_setting("tcp_listener", config.model_dump(mode="json"))
+    app.events.info(
+        "tcp",
+        f"listener config updated (enabled={config.enabled}, "
+        f"ports={config.ports}, {len(config.rules)} rule(s))",
+    )
+    return jsonify({"ok": True})
+
+
+@bp.post("/tcp/clear")
+def tcp_clear():
+    sim().db.clear_tcp_messages()
+    return jsonify({"ok": True})
+
+
+@bp.post("/tcp/delete")
+def tcp_delete():
+    sim().db.delete_tcp_message(int(_body()["id"]))
+    return jsonify({"ok": True})
+
+
+@bp.post("/tcp/mark-read")
+def tcp_mark_read():
+    sim().db.mark_tcp_read()
     return jsonify({"ok": True})
 
 

@@ -317,7 +317,7 @@ class TestSmsApi:
         sim.daemon.driver.receive_sms("+12025550123", "field test message")
         sim.daemon.tick()
         data = client.get("/api/sms.json").get_json()
-        assert any(m["body"] == "field test message" for m in data)
+        assert any(m["body"] == "field test message" for m in data["results"])
 
 
 class TestScanApi:

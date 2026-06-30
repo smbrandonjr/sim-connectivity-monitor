@@ -39,7 +39,7 @@
 
   async function loadConfig() {
     try {
-      const c = await api.udpConfig();
+      const c = await api.tcpConfig();
       enabled = !!c.enabled;
       egress = c.egress ?? "auto";
       ports = (c.ports ?? []).slice();
@@ -75,7 +75,7 @@
     // Drop blank rule rows so an empty editor row can't fail validation.
     const clean = rules.filter((r) => r.pattern.trim() && r.reply.trim());
     saving = true;
-    const ok = await api.saveUdpConfig({
+    const ok = await api.saveTcpConfig({
       enabled,
       ports,
       egress,
@@ -84,13 +84,13 @@
     saving = false;
     if (ok) {
       rules = clean.map((r) => ({ ...r }));
-      toast("UDP listener saved", "ok");
+      toast("TCP listener saved", "ok");
       setTimeout(loadConfig, 800);  // pick up the new runtime status
     }
   }
 
   async function load() {
-    const data = await api.udp(PAGE_SIZE, page * PAGE_SIZE);
+    const data = await api.tcp(PAGE_SIZE, page * PAGE_SIZE);
     messages = data.results;
     total = data.total;
   }
@@ -103,25 +103,25 @@
   $: rangeEnd = Math.min(total, (page + 1) * PAGE_SIZE);
 
   async function del(id: number) {
-    await api.deleteUdp(id);
+    await api.deleteTcp(id);
     setTimeout(load, 200);
   }
 
   async function clearAll() {
     const ok = await confirmDialog({
       title: "Clear capture log",
-      message: "Delete ALL captured UDP messages from the device? This can't be undone.",
+      message: "Delete ALL captured TCP messages from the device? This can't be undone.",
       confirmLabel: "Clear all", danger: true,
     });
     if (!ok) return;
-    await api.clearUdp();
+    await api.clearTcp();
     setTimeout(load, 400);
   }
 
   onMount(() => {
     loadConfig();
     load();
-    api.markUdpRead();  // viewing the capture log clears the unread badge
+    api.markTcpRead();  // viewing the capture log clears the unread badge
     // Only auto-reload page 0 so paging back doesn't jump under the user.
     const t = setInterval(() => { if (page === 0) load(); }, 5000);
     return () => clearInterval(t);
@@ -129,7 +129,7 @@
 </script>
 
 <div class="row">
-  <h1>UDP</h1>
+  <h1>TCP</h1>
   {#if status}
     {#if status.enabled && status.ports.length}
       <span class="badge green">listening: {status.ports.join(", ")} on {status.interface ?? "all interfaces"}</span>
@@ -152,13 +152,14 @@
     </label>
   </div>
   <p class="muted hint">
-    Bind one or more UDP ports, capture every inbound datagram, and optionally
-    auto-reply to the sender. Datagrams are decoded as UTF-8 for display and
-    matching; non-text payloads are shown as hex and never auto-replied.
+    Bind one or more TCP ports, accept connections, and capture every inbound line
+    (newline-delimited). Lines are decoded as UTF-8 for display and matching;
+    non-text lines are shown as hex and never auto-replied. Connections stay open
+    for more lines until the peer closes.
   </p>
 
   <div class="row" style="margin-top:8px">
-    <input class="ui-input" style="max-width:140px" placeholder="port (e.g. 9999)"
+    <input class="ui-input" style="max-width:140px" placeholder="port (e.g. 9998)"
       bind:value={portInput}
       on:keydown={(e) => { if (e.key === "Enter") addPort(); }} />
     <button class="ui-btn ui-btn-sm" on:click={addPort}><i class="ri-add-line"></i> Add port</button>
@@ -195,9 +196,10 @@
     </button>
   </div>
   <p class="muted hint">
-    When an inbound datagram matches a rule, the device replies to the sender on
-    the same port. Rules are tried top-to-bottom; the first match wins. A per-peer
-    rate cap prevents reply loops.
+    When an inbound line matches a rule, the device writes the reply back on the
+    same connection. Rules are tried top-to-bottom; the first match wins. A
+    per-peer rate cap prevents reply loops. Include a trailing newline in the
+    reply if your protocol expects one.
   </p>
 
   {#if showRules}
@@ -222,7 +224,7 @@
               on:click={() => removeRule(i)}><i class="ri-delete-bin-line"></i></button>
           </div>
           <div class="rline">
-            <input class="ui-input pat" placeholder="pattern to match in the datagram" bind:value={r.pattern} />
+            <input class="ui-input pat" placeholder="pattern to match in the line" bind:value={r.pattern} />
           </div>
           <div class="rline">
             <textarea class="ui-input rep" rows="2" placeholder="reply to send back" bind:value={r.reply}></textarea>
@@ -276,11 +278,11 @@
         <td><button class="ui-btn ui-btn-sm ui-btn-danger" on:click={() => del(m.id)}>Delete</button></td>
       </tr>
     {:else}
-      <tr><td colspan="7" class="muted">No datagrams captured yet.</td></tr>
+      <tr><td colspan="7" class="muted">No lines captured yet.</td></tr>
     {/each}
   </tbody>
 </table>
-<p class="muted">Non-UTF-8 payloads are shown as hex and are never auto-replied.</p>
+<p class="muted">Non-UTF-8 lines are shown as hex and are never auto-replied.</p>
 
 <style>
   .hint { font-size: var(--fs-xs, 11px); margin: 2px 0 0; }

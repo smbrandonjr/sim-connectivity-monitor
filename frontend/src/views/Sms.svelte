@@ -6,6 +6,9 @@
   import { ts } from "../lib/format";
 
   let messages: any[] = [];
+  let total = 0;
+  let page = 0;
+  const PAGE_SIZE = 25;
   let number = "";
   let text = "";
 
@@ -59,8 +62,17 @@
   }
 
   async function load() {
-    messages = await api.sms();
+    const data = await api.sms(PAGE_SIZE, page * PAGE_SIZE);
+    messages = data.results;
+    total = data.total;
   }
+  function goPage(p: number) {
+    page = Math.max(0, Math.min(p, Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)));
+    load();
+  }
+  $: pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  $: rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  $: rangeEnd = Math.min(total, (page + 1) * PAGE_SIZE);
 
   async function send() {
     if (!number || !text) {
@@ -101,19 +113,19 @@
     api.cmd("refresh-sms");    // pull straight from the modem when the page opens
     api.cmd("mark-sms-read");  // viewing the inbox clears the unread badge
     // Read the (DB-backed) inbox every 5s; force a fresh modem pull every ~15s
-    // while the page is open so new messages surface without a manual refresh.
+    // while the page is open. Only auto-reload page 0 so paging back doesn't jump.
     let n = 0;
     const t = setInterval(() => {
       n += 1;
       if (n % 3 === 0) api.cmd("refresh-sms");
-      load();
+      if (page === 0) load();
     }, 5000);
     return () => clearInterval(t);
   });
 </script>
 
 <div class="row">
-  <h1>Messages</h1>
+  <h1>SMS</h1>
   <button class="ui-btn ui-btn-sm" on:click={refresh}>Refresh</button>
   <button class="ui-btn ui-btn-sm ui-btn-danger" on:click={clearAll}>Clear all</button>
 </div>
@@ -184,6 +196,15 @@
     </div>
   {/if}
 </section>
+
+<div class="row">
+  <h2 style="flex:1">Inbox</h2>
+  {#if total > 0}
+    <span class="muted">{rangeStart}–{rangeEnd} of {total}</span>
+    <button class="ui-btn ui-btn-sm" disabled={page === 0} on:click={() => goPage(page - 1)}>‹ newer</button>
+    <button class="ui-btn ui-btn-sm" disabled={page >= pages - 1} on:click={() => goPage(page + 1)}>older ›</button>
+  {/if}
+</div>
 
 <table>
   <thead><tr><th>Time</th><th>Dir</th><th>Peer</th><th>Message</th><th></th></tr></thead>

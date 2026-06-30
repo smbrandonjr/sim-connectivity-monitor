@@ -366,6 +366,64 @@ class UdpListenerConfig(StrictModel):
         return self
 
 
+TcpMatchType = Literal["contains", "exact", "prefix", "regex"]
+
+
+class TcpReplyRule(StrictModel):
+    """One auto-reply rule for the TCP responder: when an inbound line's
+    UTF-8-decoded text matches `pattern` (by the chosen `match` mode), the
+    listener writes `reply` (UTF-8 bytes) back on the same connection.
+
+    Matching is case-insensitive by default. The pure decision lives in
+    sim_monitor.core.tcp_reply.find_reply()."""
+
+    name: str = ""  # optional human label, shown in the UI / event log
+    enabled: bool = True
+    match: TcpMatchType = "contains"
+    pattern: str = Field(min_length=1)
+    case_sensitive: bool = False
+    reply: str = Field(min_length=1, max_length=4096)  # reply bytes (UTF-8)
+
+    @model_validator(mode="after")
+    def _valid_regex(self) -> TcpReplyRule:
+        if self.match == "regex":
+            try:
+                re.compile(self.pattern)
+            except re.error as e:
+                raise ValueError(f"invalid regex {self.pattern!r}: {e}") from e
+        return self
+
+
+class TcpListenerConfig(StrictModel):
+    """Device-level TCP listener/responder: bind one or more ports, accept
+    connections, capture every inbound line (newline-delimited), and optionally
+    auto-reply on the same connection using pattern->reply rules tried in order
+    (first match wins). Connections stay open for more lines until the peer
+    closes. Global, not per-profile. UI-managed (stored in the device DB under
+    the 'tcp_listener' setting), so it can carry user payload content and never
+    needs to be committed."""
+
+    enabled: bool = False
+    ports: list[int] = Field(default_factory=list)
+    # Which interface to bind the listening sockets to (SO_BINDTODEVICE):
+    #   "wlan" = Wi-Fi, "cellular" = the live modem interface, "auto" = all
+    #   interfaces (0.0.0.0). Mirrors the heartbeat destination egress selector.
+    #   Falls back to all interfaces if the chosen one isn't up.
+    egress: EgressType = "auto"
+    rules: list[TcpReplyRule] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _valid_ports(self) -> TcpListenerConfig:
+        seen: list[int] = []
+        for p in self.ports:
+            if not 1 <= p <= 65535:
+                raise ValueError(f"port out of range (1-65535): {p}")
+            if p not in seen:
+                seen.append(p)
+        self.ports = seen
+        return self
+
+
 def _validate_context_set(contexts: list[PdpContext], label: str) -> None:
     """Each context set must have unique CIDs and exactly one bearer (a single
     context is auto-promoted). Mutates `contexts` to set the implicit bearer."""

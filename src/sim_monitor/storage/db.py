@@ -79,6 +79,18 @@ CREATE TABLE IF NOT EXISTS udp_messages (
     matched_rule TEXT                -- rule that fired (inbound), reply label (outbound)
 );
 CREATE INDEX IF NOT EXISTS idx_udp_ts ON udp_messages(ts);
+CREATE TABLE IF NOT EXISTS tcp_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    direction TEXT NOT NULL,         -- 'in' | 'out'
+    port INTEGER NOT NULL,           -- local port the connection landed on
+    peer TEXT NOT NULL,              -- 'ip:port' of the remote
+    body TEXT,                       -- UTF-8 decode of the line (NULL if not decodable)
+    body_hex TEXT,                   -- hex of raw line bytes
+    length INTEGER NOT NULL,
+    matched_rule TEXT                -- rule that fired (inbound), reply label (outbound)
+);
+CREATE INDEX IF NOT EXISTS idx_tcp_ts ON tcp_messages(ts);
 CREATE TABLE IF NOT EXISTS telemetry (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -347,10 +359,11 @@ class Database:
             self._prune("sms")
             self._conn.commit()
 
-    def recent_sms(self, limit: int = 200) -> list[dict]:
+    def recent_sms(self, limit: int = 200, offset: int = 0) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM sms ORDER BY ts DESC LIMIT ?", (limit,)
+                "SELECT * FROM sms ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?",
+                (limit, offset),
             ).fetchall()
         result = []
         for r in rows:
@@ -358,6 +371,10 @@ class Database:
             d["modem_indices"] = json.loads(d["modem_indices"]) if d["modem_indices"] else []
             result.append(d)
         return result
+
+    def count_sms(self) -> int:
+        with self._lock:
+            return self._conn.execute("SELECT COUNT(*) AS n FROM sms").fetchone()["n"]
 
     def get_sms(self, sms_id: int) -> dict | None:
         with self._lock:
@@ -394,17 +411,105 @@ class Database:
             self._prune("udp_messages")
             self._conn.commit()
 
-    def recent_udp_messages(self, limit: int = 200) -> list[dict]:
+    def recent_udp_messages(self, limit: int = 200, offset: int = 0) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM udp_messages ORDER BY ts DESC LIMIT ?", (limit,)
+                "SELECT * FROM udp_messages ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?",
+                (limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def count_udp_messages(self) -> int:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) AS n FROM udp_messages"
+            ).fetchone()["n"]
+
+    def delete_udp_message(self, row_id: int) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM udp_messages WHERE id = ?", (row_id,))
+            self._conn.commit()
 
     def clear_udp_messages(self) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM udp_messages")
             self._conn.commit()
+
+    def count_unread_udp(self) -> int:
+        return self._count_unread("udp_messages", "udp_last_read_id")
+
+    def mark_udp_read(self) -> None:
+        self._mark_read("udp_messages", "udp_last_read_id")
+
+    # ── TCP listener/responder capture log ────────────────────────────────
+    def add_tcp_message(
+        self,
+        direction: str,
+        port: int,
+        peer: str,
+        length: int,
+        body: str | None = None,
+        body_hex: str | None = None,
+        matched_rule: str | None = None,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO tcp_messages"
+                " (ts, direction, port, peer, body, body_hex, length, matched_rule)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (time.time(), direction, port, peer, body, body_hex, length, matched_rule),
+            )
+            self._prune("tcp_messages")
+            self._conn.commit()
+
+    def recent_tcp_messages(self, limit: int = 200, offset: int = 0) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM tcp_messages ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_tcp_messages(self) -> int:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) AS n FROM tcp_messages"
+            ).fetchone()["n"]
+
+    def delete_tcp_message(self, row_id: int) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM tcp_messages WHERE id = ?", (row_id,))
+            self._conn.commit()
+
+    def clear_tcp_messages(self) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM tcp_messages")
+            self._conn.commit()
+
+    def count_unread_tcp(self) -> int:
+        return self._count_unread("tcp_messages", "tcp_last_read_id")
+
+    def mark_tcp_read(self) -> None:
+        self._mark_read("tcp_messages", "tcp_last_read_id")
+
+    # ── unread watermark (append-only capture logs: udp/tcp) ──────────────
+    def _count_unread(self, table: str, watermark_key: str) -> int:
+        """Inbound rows newer than the per-channel read watermark. The watermark
+        is a settings row holding the highest message id the user has seen."""
+        watermark = self.get_setting(watermark_key) or 0
+        with self._lock:
+            return self._conn.execute(
+                f"SELECT COUNT(*) AS n FROM {table}"  # noqa: S608 — table is internal
+                " WHERE direction='in' AND id > ?",
+                (watermark,),
+            ).fetchone()["n"]
+
+    def _mark_read(self, table: str, watermark_key: str) -> None:
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT MAX(id) AS m FROM {table} WHERE direction='in'"  # noqa: S608
+            ).fetchone()
+        self.set_setting(watermark_key, row["m"] or 0)
 
     # ── telemetry ────────────────────────────────────────────────────────
     _TELEMETRY_COLS = (

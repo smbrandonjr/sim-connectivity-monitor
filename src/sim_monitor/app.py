@@ -90,6 +90,7 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
         effective_latency_config,
         make_fake_pinger,
     )
+    from sim_monitor.monitor.tcp_listener import TcpListener, effective_tcp_config
     from sim_monitor.monitor.udp_listener import UdpListener, effective_udp_config
     from sim_monitor.web import server
 
@@ -165,6 +166,18 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
     )
     udp_thread.start()
 
+    # TCP listener/responder: same as UDP but connection-oriented (line-framed).
+    tcp_listener = TcpListener(
+        store=app.store,
+        db=app.db,
+        events=app.events,
+        get_config=lambda: effective_tcp_config(app.db),
+    )
+    tcp_thread = threading.Thread(
+        target=tcp_listener.run, args=(app.stop,), name="tcp-listener", daemon=True
+    )
+    tcp_thread.start()
+
     flask_app = server.create_app(app)
     try:
         server.serve(flask_app, config.web.host, config.web.port)
@@ -177,5 +190,6 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
         ping_thread.join(timeout=5)
         http_check_thread.join(timeout=5)
         udp_thread.join(timeout=5)
+        tcp_thread.join(timeout=5)
         app.db.close()
     return 0

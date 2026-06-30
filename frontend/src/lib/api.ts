@@ -22,7 +22,10 @@ export const api = {
   urcs: () => getJSON<any[]>("/api/urcs.json"),
   identity: () => getJSON<any[]>("/api/identity.json"),
   events: () => getJSON<any[]>("/api/events.json"),
-  sms: () => getJSON<any[]>("/api/sms.json"),
+  sms: (limit = 25, offset = 0) =>
+    getJSON<{ results: any[]; total: number; limit: number; offset: number }>(
+      `/api/sms.json?limit=${limit}&offset=${offset}`,
+    ),
   telemetry: () => getJSON<{ latest: any; history: any[] }>("/api/telemetry.json"),
   monitorHistory: (limit = 25, offset = 0) =>
     getJSON<{ results: any[]; total: number; limit: number; offset: number }>(
@@ -113,7 +116,10 @@ export const api = {
     return true;
   },
 
-  udp: () => getJSON<any[]>("/api/udp.json"),
+  udp: (limit = 25, offset = 0) =>
+    getJSON<{ results: any[]; total: number; limit: number; offset: number }>(
+      `/api/udp.json?limit=${limit}&offset=${offset}`,
+    ),
   udpConfig: () => getJSON<any>("/api/udp-config.json"),
 
   async saveUdpConfig(cfg: Record<string, unknown>): Promise<boolean> {
@@ -130,6 +136,41 @@ export const api = {
     return true;
   },
   clearUdp: () => fetch("/api/udp/clear", { method: "POST" }),
+  deleteUdp: (id: number) =>
+    fetch("/api/udp/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    }),
+  markUdpRead: () => fetch("/api/udp/mark-read", { method: "POST" }),
+
+  tcp: (limit = 25, offset = 0) =>
+    getJSON<{ results: any[]; total: number; limit: number; offset: number }>(
+      `/api/tcp.json?limit=${limit}&offset=${offset}`,
+    ),
+  tcpConfig: () => getJSON<any>("/api/tcp-config.json"),
+
+  async saveTcpConfig(cfg: Record<string, unknown>): Promise<boolean> {
+    const res = await fetch("/api/tcp-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(data.error || "save failed", "error");
+      return false;
+    }
+    return true;
+  },
+  clearTcp: () => fetch("/api/tcp/clear", { method: "POST" }),
+  deleteTcp: (id: number) =>
+    fetch("/api/tcp/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    }),
+  markTcpRead: () => fetch("/api/tcp/mark-read", { method: "POST" }),
 
   placeholders: () => getJSON<Record<string, any>>("/api/placeholders.json"),
   scanStatus: () => getJSON<any>("/api/scan.json"),
