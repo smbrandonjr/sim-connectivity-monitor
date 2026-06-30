@@ -41,6 +41,15 @@ class AbortFallbackTest:
 
 
 @dataclass(frozen=True)
+class ArmFallbackTest:
+    """One-shot: run a fallback test the next time a SIM attaches, instead of
+    connecting. For boot/hot-swap of a SIM already known to need it."""
+
+    armed: bool = True
+    duration_seconds: int | None = None  # None = use profile's fallback_test setting
+
+
+@dataclass(frozen=True)
 class RunMonitorNow:
     pass
 
@@ -128,6 +137,7 @@ Command = (
     | ReleaseForce
     | StartFallbackTest
     | AbortFallbackTest
+    | ArmFallbackTest
     | RunMonitorNow
     | RunDiagnostics
     | PauseMonitor

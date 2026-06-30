@@ -844,6 +844,46 @@ class TestFallbackTest:
         assert snap.iccid == FALLBACK_ICCID
         assert snap.active_profile == "fallback-sims"
 
+    def test_fallback_interrupts_connect_attempt(self, tmp_path):
+        h = Harness(tmp_path, profiles=[DEFAULT_PROFILE, FALLBACK_PROFILE])
+        h.backend.activation_ticks = 20  # keep it stuck in CONNECTING
+        h.run_until(State.CONNECTING)
+        h.queue.put(cmd.StartFallbackTest(duration_seconds=60))
+        h.tick()
+        assert h.daemon.state is State.FALLBACK_TEST
+        assert h.driver.airplane is True
+
+    def test_arm_fallback_fires_on_sim_attach(self, tmp_path):
+        h = Harness(tmp_path, profiles=[DEFAULT_PROFILE, FALLBACK_PROFILE])
+        h.driver.sim_present = False
+        h.tick(3)
+        assert h.daemon.state is State.MODEM_FOUND
+        h.queue.put(cmd.ArmFallbackTest(armed=True, duration_seconds=60))
+        h.tick()
+        assert h.store.get().fallback_armed is True
+        # Inserting the SIM drops straight into a fallback test, not a connect.
+        h.driver.sim_present = True
+        h.driver.fallback_iccid = FALLBACK_ICCID
+        h.run_until(State.FALLBACK_TEST, max_ticks=10)
+        assert h.driver.airplane is True
+        assert h.store.get().fallback_armed is False  # one-shot consumed
+        h.tick(advance=61)  # window elapses -> normal bring-up resumes
+        h.run_until(State.CONNECTED)
+        assert h.store.get().iccid == FALLBACK_ICCID
+
+    def test_arm_fallback_persists_across_restart(self, tmp_path):
+        h = Harness(tmp_path)
+        h.queue.put(cmd.ArmFallbackTest(armed=True, duration_seconds=120))
+        h.tick()
+        from sim_monitor.core.daemon import Daemon
+        d = Daemon(
+            config=h.daemon.config, profiles=[DEFAULT_PROFILE], detector=h.detector,
+            backend=h.backend, store=h.store, command_queue=h.queue, events=h.events,
+            db=h.db, clock=lambda: h.t, sleep=lambda _s: None,
+        )
+        assert d._fallback_armed is True
+        assert d._fallback_arm_seconds == 120
+
 
 class TestCommands:
     def test_reset_modem(self, harness):

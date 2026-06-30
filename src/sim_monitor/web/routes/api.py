@@ -392,6 +392,13 @@ def command(name: str):
                 )
             case "fallback-abort":
                 command_obj = cmd.AbortFallbackTest()
+            case "fallback-arm":
+                armed = bool(body.get("armed", True))
+                dur = body.get("duration_seconds")
+                command_obj = cmd.ArmFallbackTest(
+                    armed=armed,
+                    duration_seconds=int(dur) if dur else None,
+                )
             case "force-profile":
                 command_obj = cmd.ForceProfile(name=str(body["name"]))
             case "release-force":

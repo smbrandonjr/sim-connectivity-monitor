@@ -123,6 +123,7 @@ class Snapshot:
     profile_count: int = 0
     last_error: str | None = None
     fallback: FallbackStatus = field(default_factory=FallbackStatus)
+    fallback_armed: bool = False  # run a fallback test on the next SIM attach (one-shot)
     diagnostics: DiagnosticsReport | None = None
     modem_setup: ModemSetup = field(default_factory=ModemSetup)
     rat_supported: tuple[str, ...] = ()  # RATs the current modem can be forced to

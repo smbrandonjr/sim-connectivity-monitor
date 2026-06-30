@@ -65,6 +65,17 @@ _FALLBACK_TEST_BLOCKED = (
     cmd.SetAtPort,
 )
 
+# States from which a fallback test may be started: any where a SIM is present,
+# so the test can interrupt a stuck connect attempt (CONFIGURING/CONNECTING can
+# sit for minutes on a roaming SIM) instead of only running once connected.
+_FALLBACK_TEST_FROM = (
+    S.SIM_READY,
+    S.CONFIGURING,
+    S.CONNECTING,
+    S.CONNECTED,
+    S.DEGRADED,
+)
+
 # Last-ditch catch-all used when the matched profile can't connect after the
 # recovery ladder is exhausted (daemon.fallback_to_default_profile). A plain
 # IPv4 "hologram" APN gets most Hologram SIMs online so a device is never
@@ -138,8 +149,11 @@ class Daemon:
         self._next_sim_reprobe = 0.0        # when to next nudge a SIM re-read
         self._ppp_reset_attempts = 0        # bounded modem resets to escape a PPP link
         self._next_port_scan = 0.0          # throttle serial-port scans while NO_MODEM
+        self._fallback_armed = False        # one-shot: fallback-test the next SIM attach
+        self._fallback_arm_seconds: int | None = None  # armed duration (None = default)
         self.global_monitor: MonitorConfig | None = None
         self._load_global_monitor()
+        self._load_fallback_arm()
 
         # Apply a UI-set AT-port override (survives restarts; overrides config.yaml).
         override = None
@@ -152,6 +166,7 @@ class Daemon:
 
         store.update(
             profile_count=len(profiles),
+            fallback_armed=self._fallback_armed,
             modem_setup=ModemSetup(at_port=getattr(self.detector, "at_port", "auto")),
         )
 
@@ -173,6 +188,22 @@ class Daemon:
         except Exception as e:  # noqa: BLE001 - bad stored config must not crash boot
             log.warning("invalid stored global monitor config: %s", e)
             self.global_monitor = None
+
+    def _load_fallback_arm(self) -> None:
+        """Restore the persisted 'fallback-test on next SIM attach' arm. The
+        value is absent when disarmed, "default" for the profile/default window,
+        or a stringified second count."""
+        try:
+            raw = self.db.get_setting("fallback_arm")
+        except Exception:  # noqa: BLE001 - a bad stored value must not crash boot
+            raw = None
+        if raw is None:
+            return
+        self._fallback_armed = True
+        try:
+            self._fallback_arm_seconds = None if raw in ("", "default") else int(raw)
+        except (TypeError, ValueError):
+            self._fallback_arm_seconds = None
 
     def effective_monitor_config(self) -> MonitorConfig | None:
         """The heartbeat config to use now: a profile's monitor overrides the
@@ -283,6 +314,8 @@ class Daemon:
                 if self.state is S.FALLBACK_TEST:
                     self.events.info("fallback", "fallback test aborted")
                     self._end_fallback_test()
+            case cmd.ArmFallbackTest(armed=armed, duration_seconds=duration):
+                self._arm_fallback_test(armed, duration)
             case cmd.RunMonitorNow():
                 self.monitor_trigger.set()
             case cmd.RunDiagnostics(commands=requested):
@@ -614,6 +647,10 @@ class Daemon:
         snapshot = self.store.get()
         if not snapshot.iccid:
             self._go(S.MODEM_FOUND)
+            return
+        if self._fallback_armed:
+            self.events.info("fallback", "armed fallback test firing on SIM attach")
+            self._start_fallback_test(self._consume_fallback_arm())
             return
         profile = self._select_profile(snapshot.iccid)
         if profile is None:
@@ -973,8 +1010,42 @@ class Daemon:
 
     # ------------------------------------------------------------- fallback
 
+    def _arm_fallback_test(self, armed: bool, duration: int | None) -> None:
+        """Arm/disarm the one-shot 'fallback-test on next SIM attach'. Persisted
+        so it survives a boot taken specifically to swap in a known-bad SIM."""
+        self._fallback_armed = armed
+        self._fallback_arm_seconds = duration if armed else None
+        try:
+            self.db.set_setting(
+                "fallback_arm",
+                (str(duration) if duration else "default") if armed else None,
+            )
+        except Exception as e:  # noqa: BLE001 - persistence failure must not crash
+            self.events.warning("fallback", f"could not persist fallback arm: {e}")
+        if armed:
+            self.events.info(
+                "fallback",
+                "armed: next SIM attach will run a fallback test"
+                + (f" ({duration}s)" if duration else ""),
+            )
+        else:
+            self.events.info("fallback", "fallback-on-attach disarmed")
+        self.store.update(fallback_armed=armed)
+
+    def _consume_fallback_arm(self) -> int | None:
+        """Disarm the one-shot and return its duration, without the disarm log."""
+        seconds = self._fallback_arm_seconds
+        self._fallback_armed = False
+        self._fallback_arm_seconds = None
+        try:
+            self.db.set_setting("fallback_arm", None)
+        except Exception:  # noqa: BLE001
+            pass
+        self.store.update(fallback_armed=False)
+        return seconds
+
     def _start_fallback_test(self, duration: int | None) -> None:
-        if self.driver is None or self.state not in (S.CONNECTED, S.DEGRADED):
+        if self.driver is None or self.state not in _FALLBACK_TEST_FROM:
             self.events.error(
                 "fallback", f"cannot start fallback test in state {self.state.value}"
             )

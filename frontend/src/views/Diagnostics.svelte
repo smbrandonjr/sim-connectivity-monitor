@@ -100,6 +100,17 @@
       <label class="muted">for <input class="ui-input" style="width:80px;display:inline-block" type="number" bind:value={fallbackSeconds} /> s</label>
     {/if}
   </div>
+  {#if !$status?.fallback?.active}
+    <div class="row" style="margin-top:10px">
+      {#if $status?.fallback_armed}
+        <button class="ui-btn" on:click={() => act("fallback-arm", { armed: false }, "fallback-on-insert disarmed")}>Disarm fallback-on-insert</button>
+        <span class="muted" style="color:var(--status-amber, var(--color-text-muted))">armed — the next SIM insert runs a fallback test instead of connecting</span>
+      {:else}
+        <button class="ui-btn" on:click={() => act("fallback-arm", { armed: true, duration_seconds: fallbackSeconds }, "armed for next SIM insert")}>Arm fallback on next SIM insert</button>
+        <span class="muted">for booting / hot-swapping a SIM you already know needs the test</span>
+      {/if}
+    </div>
+  {/if}
 </section>
 
 <section class="ui-card">
