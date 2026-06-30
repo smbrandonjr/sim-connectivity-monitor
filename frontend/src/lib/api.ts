@@ -113,6 +113,24 @@ export const api = {
     return true;
   },
 
+  udp: () => getJSON<any[]>("/api/udp.json"),
+  udpConfig: () => getJSON<any>("/api/udp-config.json"),
+
+  async saveUdpConfig(cfg: Record<string, unknown>): Promise<boolean> {
+    const res = await fetch("/api/udp-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(data.error || "save failed", "error");
+      return false;
+    }
+    return true;
+  },
+  clearUdp: () => fetch("/api/udp/clear", { method: "POST" }),
+
   placeholders: () => getJSON<Record<string, any>>("/api/placeholders.json"),
   scanStatus: () => getJSON<any>("/api/scan.json"),
   scanInterfaces: () => getJSON<any[]>("/api/scan/interfaces.json"),

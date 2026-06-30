@@ -10,7 +10,12 @@ from pydantic import ValidationError
 
 from sim_monitor import __version__
 from sim_monitor.config import loader
-from sim_monitor.config.schema import MonitorConfig, Profile, SmsAutoReplyConfig
+from sim_monitor.config.schema import (
+    MonitorConfig,
+    Profile,
+    SmsAutoReplyConfig,
+    UdpListenerConfig,
+)
 from sim_monitor.core import commands as cmd
 from sim_monitor.core.diagnostics import build_bundle, build_timeline
 from sim_monitor.web.routes._helpers import sim
@@ -227,6 +232,11 @@ def urcs():
 @bp.get("/sms.json")
 def sms():
     return jsonify(sim().db.recent_sms(limit=200))
+
+
+@bp.get("/udp.json")
+def udp_messages():
+    return jsonify(sim().db.recent_udp_messages(limit=200))
 
 
 @bp.get("/telemetry.json")
@@ -522,6 +532,41 @@ def sms_autoreply_put():
         f"auto-reply config updated (enabled={config.enabled}, "
         f"{len(config.rules)} rule(s))",
     )
+    return jsonify({"ok": True})
+
+
+@bp.get("/udp-config.json")
+def udp_config_get():
+    """The UI-managed UDP listener/responder config (device DB; never committed).
+    Returns the saved config, or an empty disabled default when none is set yet.
+    Includes the listener's last-known runtime status under 'status'."""
+    app = sim()
+    raw = app.db.get_setting("udp_listener")
+    config = raw or UdpListenerConfig().model_dump(mode="json")
+    return jsonify({**config, "status": app.db.get_setting("udp_status")})
+
+
+@bp.put("/udp-config")
+def udp_config_put():
+    body = _body()
+    body.pop("status", None)  # tolerate the read-only status field round-tripping back
+    try:
+        config = UdpListenerConfig.model_validate(body)
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    app = sim()
+    app.db.set_setting("udp_listener", config.model_dump(mode="json"))
+    app.events.info(
+        "udp",
+        f"listener config updated (enabled={config.enabled}, "
+        f"ports={config.ports}, {len(config.rules)} rule(s))",
+    )
+    return jsonify({"ok": True})
+
+
+@bp.post("/udp/clear")
+def udp_clear():
+    sim().db.clear_udp_messages()
     return jsonify({"ok": True})
 
 

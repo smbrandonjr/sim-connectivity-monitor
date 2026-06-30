@@ -90,6 +90,7 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
         effective_latency_config,
         make_fake_pinger,
     )
+    from sim_monitor.monitor.udp_listener import UdpListener, effective_udp_config
     from sim_monitor.web import server
 
     app = build(config, profiles)
@@ -150,6 +151,20 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
     )
     http_check_thread.start()
 
+    # UDP listener/responder: binds configured ports, captures datagrams, and
+    # optionally auto-replies. Owns its sockets (the UDP analog of the daemon's
+    # serial ownership); config is DB-only and read fresh each loop.
+    udp_listener = UdpListener(
+        store=app.store,
+        db=app.db,
+        events=app.events,
+        get_config=lambda: effective_udp_config(app.db),
+    )
+    udp_thread = threading.Thread(
+        target=udp_listener.run, args=(app.stop,), name="udp-listener", daemon=True
+    )
+    udp_thread.start()
+
     flask_app = server.create_app(app)
     try:
         server.serve(flask_app, config.web.host, config.web.port)
@@ -161,5 +176,6 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
         monitor_thread.join(timeout=5)
         ping_thread.join(timeout=5)
         http_check_thread.join(timeout=5)
+        udp_thread.join(timeout=5)
         app.db.close()
     return 0

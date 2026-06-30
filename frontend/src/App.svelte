@@ -9,6 +9,7 @@
   import Dashboard from "./views/Dashboard.svelte";
   import Profiles from "./views/Profiles.svelte";
   import Messages from "./views/Messages.svelte";
+  import Udp from "./views/Udp.svelte";
   import Timeline from "./views/Timeline.svelte";
   import Diagnostics from "./views/Diagnostics.svelte";
   import Monitoring from "./views/Monitoring.svelte";
@@ -19,6 +20,7 @@
     { id: "dashboard", label: "Dashboard", icon: "dashboard-line", view: Dashboard },
     { id: "profiles", label: "Profiles", icon: "settings-3-line", view: Profiles },
     { id: "messages", label: "Messages", icon: "message-2-line", view: Messages },
+    { id: "udp", label: "UDP", icon: "broadcast-line", view: Udp },
     { id: "monitoring", label: "Monitoring", icon: "heart-pulse-line", view: Monitoring },
     { id: "latency", label: "Latency", icon: "pulse-line", view: Latency },
     { id: "scan", label: "Scan", icon: "radar-line", view: Scan },

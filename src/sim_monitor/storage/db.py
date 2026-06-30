@@ -67,6 +67,18 @@ CREATE TABLE IF NOT EXISTS sms (
     dedup TEXT                       -- stable content key (inbound): peer|ts|body
 );
 CREATE INDEX IF NOT EXISTS idx_sms_ts ON sms(ts);
+CREATE TABLE IF NOT EXISTS udp_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    direction TEXT NOT NULL,         -- 'in' | 'out'
+    port INTEGER NOT NULL,           -- local port the datagram hit / replied from
+    peer TEXT NOT NULL,              -- 'ip:port' of the remote
+    body TEXT,                       -- UTF-8 decode (NULL if not decodable)
+    body_hex TEXT,                   -- hex of raw bytes
+    length INTEGER NOT NULL,
+    matched_rule TEXT                -- rule that fired (inbound), reply label (outbound)
+);
+CREATE INDEX IF NOT EXISTS idx_udp_ts ON udp_messages(ts);
 CREATE TABLE IF NOT EXISTS telemetry (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -359,6 +371,39 @@ class Database:
     def delete_sms_row(self, sms_id: int) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM sms WHERE id = ?", (sms_id,))
+            self._conn.commit()
+
+    # ── UDP listener/responder capture log ───────────────────────────────
+    def add_udp_message(
+        self,
+        direction: str,
+        port: int,
+        peer: str,
+        length: int,
+        body: str | None = None,
+        body_hex: str | None = None,
+        matched_rule: str | None = None,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO udp_messages"
+                " (ts, direction, port, peer, body, body_hex, length, matched_rule)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (time.time(), direction, port, peer, body, body_hex, length, matched_rule),
+            )
+            self._prune("udp_messages")
+            self._conn.commit()
+
+    def recent_udp_messages(self, limit: int = 200) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM udp_messages ORDER BY ts DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def clear_udp_messages(self) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM udp_messages")
             self._conn.commit()
 
     # ── telemetry ────────────────────────────────────────────────────────

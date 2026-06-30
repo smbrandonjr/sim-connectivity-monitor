@@ -309,6 +309,61 @@ class SmsAutoReplyConfig(StrictModel):
     rules: list[SmsReplyRule] = Field(default_factory=list)
 
 
+UdpMatchType = Literal["contains", "exact", "prefix", "regex"]
+
+
+class UdpReplyRule(StrictModel):
+    """One auto-reply rule for the UDP responder: when an inbound datagram's
+    UTF-8-decoded text matches `pattern` (by the chosen `match` mode), the
+    listener sends `reply` (UTF-8 bytes) back to the sender.
+
+    Matching is case-insensitive by default. The pure decision lives in
+    sim_monitor.core.udp_reply.find_reply()."""
+
+    name: str = ""  # optional human label, shown in the UI / event log
+    enabled: bool = True
+    match: UdpMatchType = "contains"
+    pattern: str = Field(min_length=1)
+    case_sensitive: bool = False
+    reply: str = Field(min_length=1, max_length=4096)  # reply bytes (UTF-8)
+
+    @model_validator(mode="after")
+    def _valid_regex(self) -> UdpReplyRule:
+        if self.match == "regex":
+            try:
+                re.compile(self.pattern)
+            except re.error as e:
+                raise ValueError(f"invalid regex {self.pattern!r}: {e}") from e
+        return self
+
+
+class UdpListenerConfig(StrictModel):
+    """Device-level UDP listener/responder: bind one or more ports, capture every
+    inbound datagram, and optionally auto-reply to the sender using a list of
+    pattern->reply rules tried in order (first match wins). Global, not
+    per-profile. UI-managed (stored in the device DB under the 'udp_listener'
+    setting), so it can carry user payload content and never needs to be
+    committed."""
+
+    enabled: bool = False
+    ports: list[int] = Field(default_factory=list)
+    # "" = bind all interfaces (0.0.0.0). A non-empty interface name binds the
+    # listening sockets to that netdev via SO_BINDTODEVICE (Linux + root only).
+    bind_interface: str = ""
+    rules: list[UdpReplyRule] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _valid_ports(self) -> UdpListenerConfig:
+        seen: list[int] = []
+        for p in self.ports:
+            if not 1 <= p <= 65535:
+                raise ValueError(f"port out of range (1-65535): {p}")
+            if p not in seen:
+                seen.append(p)
+        self.ports = seen
+        return self
+
+
 def _validate_context_set(contexts: list[PdpContext], label: str) -> None:
     """Each context set must have unique CIDs and exactly one bearer (a single
     context is auto-promoted). Mutates `contexts` to set the implicit bearer."""
