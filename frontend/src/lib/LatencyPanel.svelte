@@ -175,12 +175,18 @@
   });
   onDestroy(() => clearInterval(timer));
 
-  function perInterface(metric: "rtt" | "loss") {
+  // Series grouped by interface for one metric. Without `targetFilter`, every
+  // target for an interface is averaged into a single line (overview). With a
+  // `targetFilter`, only that target's samples are kept — the basis for the
+  // per-target small-multiples that reveal whether an issue is isolated to one
+  // target or widespread across all of them.
+  function perInterface(metric: "rtt" | "loss", targetFilter?: string) {
     const out: Record<string, { ts: number; value: number | null }[]> = {};
     if (!data?.series) return out;
     const acc: Record<string, Record<number, { sum: number; n: number }>> = {};
     for (const [key, points] of Object.entries<any>(data.series)) {
-      const iface = key.split("|")[0];
+      const [iface, target] = key.split("|");
+      if (targetFilter != null && target !== targetFilter) continue;
       acc[iface] ||= {};
       for (const p of points) {
         const v = metric === "rtt" ? p.rtt_avg_ms : p.loss_pct;
@@ -224,6 +230,22 @@
   $: rttSeries = data ? perInterface("rtt") : {};
   $: lossSeries = data ? perInterface("loss") : {};
   $: headline = data?.headline ?? {};
+
+  // Distinct targets in the current window. With >1, the user can split the
+  // combined per-interface charts into one chart per target (each still drawn
+  // with a line per interface). The choice is remembered per monitor kind.
+  $: targets = data?.series
+    ? Array.from(new Set(Object.keys(data.series).map((k) => k.split("|")[1]))).sort()
+    : [];
+  const SPLIT_KEY = `latency-split-${kind}`;
+  let splitTargets = (() => {
+    try { return localStorage.getItem(SPLIT_KEY) === "1"; } catch { return false; }
+  })();
+  $: try { localStorage.setItem(SPLIT_KEY, splitTargets ? "1" : "0"); } catch { /* ignore */ }
+
+  $: splitView = splitTargets && targets.length > 1;
+  $: rttByTarget = splitView ? Object.fromEntries(targets.map((t) => [t, perInterface("rtt", t)])) : {};
+  $: lossByTarget = splitView ? Object.fromEntries(targets.map((t) => [t, perInterface("loss", t)])) : {};
 
   function buildSummary(d: any) {
     if (!d?.series) return [];
@@ -363,8 +385,17 @@
       </div>
 
       <div class="row charthdr">
-        <h3 class="ttl" style="flex:1;margin:0">{L.latency} <span class="muted">({SOURCE_LABEL[data.source] ?? data.source})</span></h3>
-        <span class="muted hint">drag to zoom</span>
+        <span class="muted hint" style="flex:1">drag a chart to zoom</span>
+        {#if targets.length > 1}
+          <div class="seg">
+            <button class="chip" class:on={!splitTargets}
+              title="Average each interface across all {targets.length} targets"
+              on:click={() => (splitTargets = false)}>Combined</button>
+            <button class="chip" class:on={splitTargets}
+              title="One chart per target — spot whether a problem is isolated to a target or widespread"
+              on:click={() => (splitTargets = true)}>Per target</button>
+          </div>
+        {/if}
         {#if zoomWindow}
           <button class="chip" on:click={zoomOut} title="Zoom out one step">
             <i class="ri-zoom-out-line"></i> out
@@ -372,14 +403,34 @@
           <button class="chip" on:click={resetZoom} title="Back to the selected range">reset</button>
         {/if}
       </div>
-      <LatencyChart series={rttSeries} {colorOf} {cellular}
-        windowStart={data.window_start} windowEnd={data.window_end} unit="ms" valueFloor={0}
-        on:zoom={onZoom} />
 
-      <h3 class="ttl">{L.loss}</h3>
-      <LatencyChart series={lossSeries} {colorOf} {cellular}
-        windowStart={data.window_start} windowEnd={data.window_end} unit="%" valueFloor={0} valueCeil={100}
-        on:zoom={onZoom} />
+      {#if splitView}
+        <h3 class="ttl">{L.latency} <span class="muted">({SOURCE_LABEL[data.source] ?? data.source}, per target)</span></h3>
+        {#each targets as tgt}
+          <div class="smcap"><span class="mono">{tgt}</span></div>
+          <LatencyChart series={rttByTarget[tgt]} {colorOf} {cellular}
+            windowStart={data.window_start} windowEnd={data.window_end} unit="ms" valueFloor={0}
+            on:zoom={onZoom} />
+        {/each}
+
+        <h3 class="ttl">{L.loss} <span class="muted">(per target)</span></h3>
+        {#each targets as tgt}
+          <div class="smcap"><span class="mono">{tgt}</span></div>
+          <LatencyChart series={lossByTarget[tgt]} {colorOf} {cellular}
+            windowStart={data.window_start} windowEnd={data.window_end} unit="%" valueFloor={0} valueCeil={100}
+            on:zoom={onZoom} />
+        {/each}
+      {:else}
+        <h3 class="ttl">{L.latency} <span class="muted">({SOURCE_LABEL[data.source] ?? data.source})</span></h3>
+        <LatencyChart series={rttSeries} {colorOf} {cellular}
+          windowStart={data.window_start} windowEnd={data.window_end} unit="ms" valueFloor={0}
+          on:zoom={onZoom} />
+
+        <h3 class="ttl">{L.loss}</h3>
+        <LatencyChart series={lossSeries} {colorOf} {cellular}
+          windowStart={data.window_start} windowEnd={data.window_end} unit="%" valueFloor={0} valueCeil={100}
+          on:zoom={onZoom} />
+      {/if}
 
       <div class="row" style="margin-top:18px">
         <h3 class="ttl" style="flex:1;margin:0">Summary <span class="muted">({SOURCE_LABEL[data.source] ?? data.source} over window)</span></h3>
@@ -440,6 +491,10 @@
   .seg { display: flex; gap: 4px; flex-wrap: wrap; }
   .ttl { font-size: var(--fs-sm); margin: 16px 0 4px; color: var(--color-text-muted); }
   .charthdr { align-items: center; gap: 10px; margin: 16px 0 4px; }
+  .smcap {
+    font-size: var(--fs-xs, 11px); color: var(--color-text-muted);
+    margin: 10px 0 -2px;
+  }
   .charthdr .hint { font-size: var(--fs-xs, 11px); opacity: .65; }
   .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
   .lg {

@@ -52,6 +52,14 @@
     destinations = destinations;
   }
 
+  // The payload is configured once and rarely touched, so the card collapses to
+  // reclaim screen space; the open/closed choice persists across visits.
+  const PAYLOAD_KEY = "monitoring-payload-open";
+  let payloadOpen = (() => {
+    try { return localStorage.getItem(PAYLOAD_KEY) !== "0"; } catch { return true; }
+  })();
+  $: try { localStorage.setItem(PAYLOAD_KEY, payloadOpen ? "1" : "0"); } catch { /* ignore */ }
+
   // body: structured builder (default) or raw template — SHARED across destinations
   let useRawBody = false;
   let rawBody = "";
@@ -394,11 +402,20 @@
 </section>
 
 <section class="ui-card">
-  <div class="row">
-    <h2 style="flex:1">Payload <span class="muted" style="font-weight:400">(shared by all destinations)</span></h2>
-    <label class="muted"><input type="checkbox" bind:checked={useRawBody} /> raw template instead</label>
+  <div class="row payloadhdr">
+    <button class="collapse" aria-expanded={payloadOpen} on:click={() => (payloadOpen = !payloadOpen)}>
+      <span class="chev" class:open={payloadOpen}>▸</span>
+      <h2>Payload <span class="muted" style="font-weight:400">(shared by all destinations)</span></h2>
+    </button>
+    <span style="flex:1"></span>
+    {#if payloadOpen}
+      <label class="muted"><input type="checkbox" bind:checked={useRawBody} /> raw template instead</label>
+    {:else}
+      <span class="muted">{useRawBody ? "raw template" : `${fields.length} field${fields.length === 1 ? "" : "s"}`}</span>
+    {/if}
   </div>
 
+  {#if payloadOpen}
   {#if useRawBody}
     <textarea class="ui-textarea" rows="6" bind:value={rawBody}
       placeholder={'{"iccid":"{iccid}","status":"{status}"}'}></textarea>
@@ -450,6 +467,7 @@
       <summary>Live preview (what would send now)</summary>
       <div class="code-block" style="margin-top:6px">{preview}</div>
     </details>
+  {/if}
   {/if}
 </section>
 
@@ -506,6 +524,18 @@
     background: none; border: none; padding: 0; cursor: pointer; font: inherit;
     font-size: var(--fs-xs, 11px); color: var(--color-primary); text-decoration: underline;
   }
+
+  .payloadhdr { align-items: center; gap: 10px; }
+  .collapse {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit;
+  }
+  .collapse h2 { margin: 0; }
+  .collapse .chev {
+    display: inline-block; color: var(--color-text-muted);
+    transition: transform .12s ease;
+  }
+  .collapse .chev.open { transform: rotate(90deg); }
 
   .save-status { font-size: var(--fs-sm, 13px); min-width: 84px; }
   .save-status.saving { color: var(--color-text-muted); }
