@@ -18,7 +18,6 @@
   let egress = "auto";
   let ports: number[] = [];
   let portInput = "";
-  let saving = false;
 
   // ── auto-reply rules ──────────────────────────────────────────────────────
   type Rule = {
@@ -45,6 +44,8 @@
       ports = (c.ports ?? []).slice();
       rules = (c.rules ?? []).map((r: any) => ({ ...blankRule(), ...r }));
       status = c.status ?? null;
+      lastSaved = JSON.stringify(buildConfig());  // baseline so load won't re-save
+      ready = true;
     } catch {
       /* keep defaults */
     }
@@ -71,21 +72,47 @@
     rules = rules.filter((_, idx) => idx !== i);
   }
 
-  async function save() {
-    // Drop blank rule rows so an empty editor row can't fail validation.
+  function buildConfig() {
+    // Drop blank rule rows so a half-typed editor row can't fail validation.
     const clean = rules.filter((r) => r.pattern.trim() && r.reply.trim());
-    saving = true;
-    const ok = await api.saveUdpConfig({
-      enabled,
-      ports,
-      egress,
-      rules: clean,
-    });
-    saving = false;
+    return { enabled, ports, egress, rules: clean };
+  }
+
+  // ── auto-save (debounced) ─────────────────────────────────────────────────
+  let ready = false;
+  let lastSaved = "";
+  let saveState: "idle" | "saving" | "saved" | "error" = "idle";
+  let saveTimer: ReturnType<typeof setTimeout>;
+
+  function scheduleSave() {
+    if (!ready) return;
+    if (JSON.stringify(buildConfig()) === lastSaved) {
+      clearTimeout(saveTimer);
+      return;
+    }
+    saveState = "saving";
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(doSave, 700);
+  }
+  async function doSave() {
+    const cur = JSON.stringify(buildConfig());
+    const ok = await api.saveUdpConfig(buildConfig());
     if (ok) {
-      rules = clean.map((r) => ({ ...r }));
-      toast("UDP listener saved", "ok");
-      setTimeout(loadConfig, 800);  // pick up the new runtime status
+      lastSaved = cur;
+      saveState = "saved";
+      setTimeout(refreshStatus, 900);  // pick up the new runtime bind status
+    } else {
+      saveState = "error";
+    }
+  }
+  // Editing enabled/egress/ports/rules re-runs this and persists.
+  $: scheduleSave(enabled, egress, ports, rules);
+
+  async function refreshStatus() {
+    try {
+      status = (await api.udpConfig()).status ?? null;
+    } catch {
+      /* keep last */
     }
   }
 
@@ -141,8 +168,12 @@
     {#each status.errors ?? [] as e}<span class="badge red">{e}</span>{/each}
   {/if}
   <span style="flex:1"></span>
+  <span class="save-status {saveState}">
+    {#if saveState === "saving"}● saving…{:else if saveState === "saved"}✓ saved{:else if saveState === "error"}✕ save failed{/if}
+  </span>
   <button class="ui-btn ui-btn-sm ui-btn-danger" on:click={clearAll}>Clear log</button>
 </div>
+<p class="muted" style="margin-top:-4px">Changes save automatically.</p>
 
 <section class="ui-card">
   <div class="row">
@@ -237,13 +268,6 @@
       <button class="ui-btn ui-btn-sm" on:click={addRule}><i class="ri-add-line"></i> Add rule</button>
     </div>
   {/if}
-
-  <div class="row" style="margin-top:10px">
-    <span style="flex:1"></span>
-    <button class="ui-btn ui-btn-primary ui-btn-sm" on:click={save} disabled={saving}>
-      {saving ? "Saving…" : "Save listener"}
-    </button>
-  </div>
 </section>
 
 <div class="row">
@@ -283,6 +307,10 @@
 <p class="muted">Non-UTF-8 payloads are shown as hex and are never auto-replied.</p>
 
 <style>
+  .save-status { font-size: var(--fs-sm, 13px); min-width: 84px; }
+  .save-status.saving { color: var(--color-text-muted); }
+  .save-status.saved { color: var(--status-green); }
+  .save-status.error { color: var(--status-red); }
   .hint { font-size: var(--fs-xs, 11px); margin: 2px 0 0; }
   .toggle {
     display: inline-flex; align-items: center; gap: 6px;
