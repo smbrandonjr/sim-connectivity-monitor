@@ -75,6 +75,14 @@ proprietary brand fonts are vendored — Inter + JetBrains Mono (OFL) + Remix Ic
   reboots the Pi) → systemd `WatchdogSec` for hangs → `StartLimit*` to stop crash loops.
 - Live config on the Pi: `/etc/sim-monitor/config.yaml` + `/etc/sim-monitor/profiles.d/*.yaml`.
 
+## Working notes
+
+- At the start of every session, read `working-notes.md` (a gitignored, local-only
+  scratch list the user keeps). Treat each `--`-prefixed line as an outstanding item to
+  consider — it may bear on whatever else is being worked on. As an item is genuinely
+  addressed, delete that line from the file. Never commit `working-notes.md` (it's in
+  `.gitignore`); leave items you haven't resolved untouched.
+
 ## Conventions
 
 - **This is a PUBLIC repo — never commit secrets.** Real configs (`config/config.yaml`,
