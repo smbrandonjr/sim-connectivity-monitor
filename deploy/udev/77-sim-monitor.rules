@@ -33,3 +33,6 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1e0e", ATTRS{idProduct}=="9206", ENV{ID_USB_
 # your unit (Telit compositions vary with AT#USBCFG).
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1bc7", ATTRS{idProduct}=="1201", ENV{ID_USB_INTERFACE_NUM}=="04", ENV{ID_MM_PORT_IGNORE}="1", SYMLINK+="sim-monitor-at"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1bc7", ATTRS{idProduct}=="0036", ENV{ID_USB_INTERFACE_NUM}=="04", ENV{ID_MM_PORT_IGNORE}="1", SYMLINK+="sim-monitor-at"
+# LE910C1-WWX: 3 ttyUSB (if00 DIAG, if01+if02 both AT) + cdc-wdm0 QMI. MM
+# controls over QMI, so reserve one AT port (if02); MM keeps if01.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1bc7", ATTRS{idProduct}=="1031", ENV{ID_USB_INTERFACE_NUM}=="02", ENV{ID_MM_PORT_IGNORE}="1", SYMLINK+="sim-monitor-at"

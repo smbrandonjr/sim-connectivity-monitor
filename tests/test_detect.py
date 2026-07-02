@@ -28,6 +28,15 @@ class TestHelpers:
         ]
         assert pick_at_port(ports).device == "/dev/ttyUSB3"
 
+    def test_pick_at_port_telit_le910c1_wwx(self):
+        # 1bc7:1031 exposes 3 ttyUSB (if00 DIAG, if01/if02 AT); we reserve if02.
+        ports = [
+            SerialPortInfo("/dev/ttyUSB0", 0x1BC7, 0x1031, "1-1.2:1.0"),
+            SerialPortInfo("/dev/ttyUSB1", 0x1BC7, 0x1031, "1-1.2:1.1"),
+            SerialPortInfo("/dev/ttyUSB2", 0x1BC7, 0x1031, "1-1.2:1.2"),
+        ]
+        assert pick_at_port(ports).device == "/dev/ttyUSB2"
+
     def test_pick_at_port_unknown_modem(self):
         assert pick_at_port([SerialPortInfo("/dev/ttyUSB0", 0x1234, 0x5678, "1-1:1.0")]) is None
 
