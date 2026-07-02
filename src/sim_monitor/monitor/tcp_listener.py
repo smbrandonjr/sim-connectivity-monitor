@@ -196,6 +196,12 @@ class TcpListener:
             self._drop_conn(selector, conn)
             return
         if not data:  # peer closed
+            # Flush a trailing un-terminated line so a client that sends a
+            # payload without a newline and closes (common with simple tools:
+            # `printf hi | nc`, a one-shot sendall) is still captured.
+            if conn.buf:
+                self._handle_line(conn, bytes(conn.buf), config)
+                conn.buf = bytearray()
             self._drop_conn(selector, conn)
             return
         conn.buf.extend(data)

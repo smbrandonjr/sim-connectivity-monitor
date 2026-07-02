@@ -111,6 +111,26 @@ class TestLiveListener:
         assert len(ins) == 1
         assert ins[0]["body"] == "ping"
 
+    def test_unterminated_line_flushed_on_close(self, db):
+        # A client that sends a payload without a trailing newline and then
+        # closes must still be captured (common with `printf hi | nc` and one-
+        # shot sendall clients). Regression for silently-dropped-on-close.
+        port = free_port()
+        cfg = TcpListenerConfig(enabled=True, ports=[port])
+        listener = make_listener(db, cfg)
+        stop, t = self._run(listener)
+        try:
+            c = connect_retry(port)
+            c.sendall(b"no-newline-here")  # no trailing "\n"
+            c.close()                       # peer closes -> must flush buffer
+            wait_rows(db, 1)
+        finally:
+            stop.set()
+            t.join(timeout=2)
+        ins = [r for r in db.recent_tcp_messages() if r["direction"] == "in"]
+        assert len(ins) == 1
+        assert ins[0]["body"] == "no-newline-here"
+
     def test_binary_line_hex_no_reply(self, db):
         port = free_port()
         cfg = TcpListenerConfig(

@@ -30,14 +30,34 @@
   let theme = currentTheme();
   let editingName = false;
   let nameInput = "";
+  let savingName = false;
+  let cancelName = false;
+
+  // autofocus is unreliable on dynamically-inserted inputs; focus + select on mount.
+  function focusOnMount(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
 
   function startEditName() {
     nameInput = $status?.sim_name ?? "";
     editingName = true;
   }
-  async function saveName() {
+  function cancelEditName() {
+    cancelName = true; // suppress the blur-save that unmounting the input triggers
     editingName = false;
-    await api.cmd("set-sim-name", { name: nameInput.trim() });
+  }
+  async function saveName() {
+    if (cancelName) { cancelName = false; return; }
+    if (savingName) return; // Enter unmounts the input -> induced blur; save once
+    savingName = true;
+    editingName = false;
+    const name = nameInput.trim();
+    const ok = await api.cmd("set-sim-name", { name });
+    // The daemon applies the name out-of-band (queued command); reflect it now
+    // instead of waiting up to a poll interval for the next /status refresh.
+    if (ok) status.update((s) => (s ? { ...s, sim_name: name || null } : s));
+    savingName = false;
   }
 
   function applyHash() {
@@ -98,12 +118,12 @@
       class="ui-input brand-edit"
       bind:value={nameInput}
       placeholder="name this SIM"
-      autofocus
+      use:focusOnMount
       on:blur={saveName}
-      on:keydown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") (editingName = false); }}
+      on:keydown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") cancelEditName(); }}
     />
   {:else}
-    <span class="brand" title={$status?.sim_present ? "click to name this SIM" : "sim-monitor"}
+    <span class="brand" title={$status?.sim_present ? "click to name this SIM" : "insert a SIM to name it"}
           class:editable={$status?.sim_present}
           on:click={() => $status?.sim_present && startEditName()}
           role="button" tabindex="0">

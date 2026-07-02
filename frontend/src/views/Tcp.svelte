@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "../lib/api";
+  import { status as appStatus } from "../lib/stores";
   import { toast } from "../lib/toast";
   import { confirmDialog } from "../lib/confirm";
   import { ts } from "../lib/format";
@@ -145,12 +146,20 @@
     setTimeout(load, 400);
   }
 
+  async function markRead() {
+    // Viewing the capture log clears the unread badge. Zero it locally too so
+    // it clears immediately instead of lagging until the next status poll.
+    await api.markTcpRead();
+    appStatus.update((s) => (s ? { ...s, tcp_unread: 0 } : s));
+  }
+
   onMount(() => {
     loadConfig();
     load();
-    api.markTcpRead();  // viewing the capture log clears the unread badge
+    markRead();
     // Only auto-reload page 0 so paging back doesn't jump under the user.
-    const t = setInterval(() => { if (page === 0) load(); }, 5000);
+    // Re-mark read so lines arriving while you watch don't re-raise the badge.
+    const t = setInterval(() => { if (page === 0) { load(); markRead(); } }, 5000);
     return () => clearInterval(t);
   });
 </script>

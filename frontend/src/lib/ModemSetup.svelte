@@ -13,6 +13,11 @@
   function hex(v: number | null | undefined) {
     return v == null ? "—" : v.toString(16).padStart(4, "0");
   }
+  // No USB VID/PID => an on-board UART (ttyS0/ttyAMA0), not a USB modem port.
+  // Only relevant for modems wired to the Pi's serial header (HATs).
+  function isUart(p: any) {
+    return p.vid == null && p.pid == null;
+  }
   function recommended(p: any) {
     return p.tested && p.responded && !p.mm_claimed && !p.is_current;
   }
@@ -67,13 +72,14 @@
       </thead>
       <tbody>
         {#each ports as p}
-          <tr class:rec={recommended(p)}>
+          <tr class:rec={recommended(p)} class:uart={isUart(p)}>
             <td class="mono nowrap">{p.device}</td>
             <td class="mono">{p.interface != null ? "if" + String(p.interface).padStart(2, "0") : "—"}</td>
-            <td class="mono">{hex(p.vid)}:{hex(p.pid)}</td>
+            <td class="mono">{#if isUart(p)}<span class="muted">on-board UART</span>{:else}{hex(p.vid)}:{hex(p.pid)}{/if}</td>
             <td class="nowrap">
               {#if p.is_current}<span class="badge green">current</span>{/if}
               {#if p.mm_claimed}<span class="badge amber" title="ModemManager uses this port — don't take it">MM uses</span>{/if}
+              {#if isUart(p)}<span class="badge" title="Not a USB modem port. Only relevant for a modem wired to the Pi's serial header (HAT); USB modems appear as ttyUSB* with a USB ID.">UART</span>{/if}
             </td>
             <td class="break">
               {#if busy === p.device}
@@ -97,6 +103,8 @@
     <p class="muted" style="margin-top:8px">
       Tip: the right port answers a Test with the modem's name (e.g. <code>SIMCOM SIM7080</code>)
       and isn't marked “MM uses”. The choice is saved on the device and survives reboots.
+      Ports marked <strong>UART</strong> are the Pi's own serial pins — ignore them unless your
+      modem is a serial HAT rather than USB.
     </p>
   {:else}
     <p class="muted">No serial ports found yet. Plug in the modem and click “Rescan ports”.</p>
@@ -105,4 +113,5 @@
 
 <style>
   tr.rec td { background: rgba(52, 211, 153, 0.08); }
+  tr.uart td { opacity: 0.55; }
 </style>
