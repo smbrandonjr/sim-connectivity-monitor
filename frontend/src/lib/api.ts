@@ -19,7 +19,8 @@ export const api = {
       `/api/timeline.json?${q.toString()}`,
     );
   },
-  urcs: () => getJSON<any[]>("/api/urcs.json"),
+  urcs: (after?: number) =>
+    getJSON<any[]>(after != null ? `/api/urcs.json?after=${after}` : "/api/urcs.json"),
   identity: () => getJSON<any[]>("/api/identity.json"),
   events: () => getJSON<any[]>("/api/events.json"),
   sms: (limit = 25, offset = 0) =>

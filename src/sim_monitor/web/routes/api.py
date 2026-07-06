@@ -231,7 +231,30 @@ def http_checks_csv():
 
 @bp.get("/urcs.json")
 def urcs():
-    return jsonify(sim().db.recent_urcs(limit=300))
+    # ?after=<id> tails the URC log incrementally (live console polling):
+    # only rows newer than that id, oldest-first.
+    after = request.args.get("after", type=int)
+    return jsonify(sim().db.recent_urcs(limit=300, after_id=after))
+
+
+@bp.post("/debug/urc")
+def debug_urc():
+    """Simulate mode only: inject a raw URC line into the fake modem, exactly
+    as if the module emitted it (classified, drained next daemon tick)."""
+    app = sim()
+    if not app.config.simulate:
+        return jsonify({"error": "only available in --simulate mode"}), 403
+    raw = (request.get_json(silent=True) or {}).get("raw", "").strip()
+    if not raw:
+        return jsonify({"error": "missing 'raw'"}), 400
+    driver = app.daemon.driver
+    if driver is None or not hasattr(driver, "push_urc"):
+        return jsonify({"error": "fake modem not detected yet"}), 409
+    from sim_monitor.modem import at_parser
+
+    kind, fields = at_parser.classify_urc(raw)
+    driver.push_urc(kind, fields, raw=raw)
+    return jsonify({"ok": True, "kind": kind})
 
 
 def _page_args() -> tuple[int, int]:

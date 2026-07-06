@@ -117,6 +117,43 @@ class TestTimelineAndBundle:
         identity = client.get("/api/identity.json").get_json()
         assert any(row["reason"] == "ota-swap" for row in identity)
 
+    def test_urcs_after_tails_incrementally(self, sim, client):
+        tick_until_connected(sim)
+        sim.daemon.driver.push_urc("ring", {}, raw="RING")
+        sim.daemon.tick()
+        rows = client.get("/api/urcs.json").get_json()  # newest-first
+        last_id = max(r["id"] for r in rows)
+        sim.daemon.driver.push_urc(
+            "caller_id", {"number": "+15550001111", "type": 145},
+            raw='+CLIP: "+15550001111",145',
+        )
+        sim.daemon.tick()
+        tail = client.get(f"/api/urcs.json?after={last_id}").get_json()
+        assert [r["raw"] for r in tail] == ['+CLIP: "+15550001111",145']
+        assert all(r["id"] > last_id for r in tail)
+        # no new rows -> empty tail
+        newest = max(r["id"] for r in tail)
+        assert client.get(f"/api/urcs.json?after={newest}").get_json() == []
+
+    def test_debug_urc_injection(self, sim, client):
+        tick_until_connected(sim)
+        resp = client.post("/api/debug/urc", json={"raw": '+CLIP: "+15550001111",145'})
+        assert resp.status_code == 200
+        assert resp.get_json()["kind"] == "caller_id"
+        sim.daemon.tick()
+        rows = client.get("/api/urcs.json").get_json()
+        assert rows[0]["kind"] == "caller_id"
+        events = client.get("/api/events.json").get_json()
+        assert any("incoming call from +15550001111" in e["message"] for e in events)
+
+    def test_debug_urc_rejected_outside_simulate(self, sim, client):
+        sim.config.simulate = False
+        try:
+            resp = client.post("/api/debug/urc", json={"raw": "RING"})
+            assert resp.status_code == 403
+        finally:
+            sim.config.simulate = True
+
     def test_events_and_monitor_json(self, sim, client):
         tick_until_connected(sim)
         assert client.get("/api/events.json").status_code == 200

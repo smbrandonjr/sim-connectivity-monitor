@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { api } from "../lib/api";
   import { ts } from "../lib/format";
+  import UrcConsole from "../lib/UrcConsole.svelte";
 
   let rows: any[] = [];
   let total = 0;
@@ -64,6 +65,8 @@
 <p class="muted">Everything that happened, time-ordered: state changes and events, unsolicited
   modem messages (URCs), and SIM identity changes. The diagnostic bundle is a secret-free JSON
   snapshot you can share for side-by-side comparison between devices.</p>
+
+<UrcConsole />
 
 <div class="row" style="margin-bottom:8px">
   {#if total > 0}

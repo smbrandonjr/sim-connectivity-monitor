@@ -58,6 +58,8 @@ class ATModemDriver(ModemDriver):
         "AT+CEREG=2",
         "AT+CTZR=1",          # network time-zone (NITZ) URCs
         'AT+CNMI=2,1,0,0,0',  # new SMS -> +CMTI indication (store, don't dump)
+        "AT+CLIP=1",          # incoming call -> +CLIP with caller number
+        "AT+CRC=1",           # ring as +CRING: <type> (VOICE vs data)
     )
 
     def __init__(self, channel: ATChannel) -> None:

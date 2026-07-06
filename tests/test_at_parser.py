@@ -168,6 +168,22 @@ class TestClassifyUrc:
         assert classify_urc("RING")[0] == "ring"
         assert classify_urc("NO CARRIER")[0] == "no_carrier"
 
+    def test_cring_voice(self):
+        kind, fields = classify_urc("+CRING: VOICE")
+        assert kind == "ring"
+        assert fields["type"] == "VOICE"
+
+    def test_clip_caller_id(self):
+        kind, fields = classify_urc('+CLIP: "+15551234567",145,,,,0')
+        assert kind == "caller_id"
+        assert fields["number"] == "+15551234567"
+        assert fields["type"] == 145
+
+    def test_clip_withheld_number(self):
+        kind, fields = classify_urc('+CLIP: "",128')
+        assert kind == "caller_id"
+        assert fields["number"] is None
+
     def test_unknown_keeps_raw(self):
         kind, fields = classify_urc("+SOMETHING: weird")
         assert kind == "unknown"

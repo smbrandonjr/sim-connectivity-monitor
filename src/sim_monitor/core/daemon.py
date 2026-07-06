@@ -427,6 +427,9 @@ class Daemon:
                     self.store.update(registration=label)
                     self.events.info("identity", f"registration: {label}")
                     self._record_identity("registration-change")
+            elif ev.kind == "caller_id":
+                number = ev.fields.get("number") or "withheld/unknown"
+                self.events.info("urc", f"incoming call from {number}")
             elif ev.kind not in ("unknown",):
                 self.events.info("urc", f"{ev.kind}: {ev.raw}")
 

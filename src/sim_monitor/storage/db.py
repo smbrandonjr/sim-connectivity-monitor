@@ -267,11 +267,19 @@ class Database:
             self._prune("urc_log")
             self._conn.commit()
 
-    def recent_urcs(self, limit: int = 300) -> list[dict]:
+    def recent_urcs(self, limit: int = 300, after_id: int | None = None) -> list[dict]:
+        """Latest URCs newest-first; with after_id, only rows newer than that
+        id, oldest-first (incremental tail for the live console)."""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM urc_log ORDER BY id DESC LIMIT ?", (limit,)
-            ).fetchall()
+            if after_id is not None:
+                rows = self._conn.execute(
+                    "SELECT * FROM urc_log WHERE id > ? ORDER BY id ASC LIMIT ?",
+                    (after_id, limit),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM urc_log ORDER BY id DESC LIMIT ?", (limit,)
+                ).fetchall()
         return [dict(r) for r in rows]
 
     def add_identity(

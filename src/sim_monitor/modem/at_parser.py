@@ -160,7 +160,7 @@ def classify_urc(line: str) -> tuple[str, dict]:
     """Classify one unsolicited line. Returns (kind, fields).
 
     kinds: new_sms, sms_deliver, sim_status, registration, nitz, ring,
-    no_carrier, unknown.
+    caller_id, no_carrier, unknown.
     """
     line = line.strip()
     upper = line.upper()
@@ -207,8 +207,16 @@ def classify_urc(line: str) -> tuple[str, dict]:
 
     if upper.startswith(("+CTZV:", "+CTZE:", "+CTZDST:", "*PSUTTZ", "+QLTS")):
         return "nitz", {"raw": line}
+    # Incoming call. Bare RING, or +CRING: <type> when AT+CRC=1 is active.
     if upper == "RING":
         return "ring", {}
+    m = re.match(r"\+CRING:\s*(.+)", line, re.I)
+    if m:
+        return "ring", {"type": m.group(1).strip()}
+    # Caller ID (needs AT+CLIP=1): +CLIP: "<number>",<type>[,...]
+    m = re.match(r'\+CLIP:\s*"([^"]*)"\s*,\s*(\d+)', line)
+    if m:
+        return "caller_id", {"number": m.group(1) or None, "type": int(m.group(2))}
     if upper.startswith("NO CARRIER"):
         return "no_carrier", {}
     return "unknown", {"raw": line}

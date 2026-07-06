@@ -46,7 +46,7 @@ _ALWAYS_ASYNC = (
     "+CMTI:", "+CMT:", "+CDS:", "+CBM:", "+CMGR:",
     "+QIND:", "+QSIMSTAT:", "+QUSIM:",
     "+CTZV:", "+CTZE:", "+CTZDST:", "*PSUTTZ", "+PACSP",
-    "RING", "NO CARRIER", "NO DIALTONE", "+CGEV:",
+    "RING", "+CRING:", "+CLIP:", "NO CARRIER", "NO DIALTONE", "+CGEV:",
 )
 
 
