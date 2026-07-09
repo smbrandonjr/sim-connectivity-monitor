@@ -136,7 +136,7 @@ class ConntrackSource:
 # ── simulate mode ────────────────────────────────────────────────────────────
 
 # The fake device's own addresses (cellular + LAN + loopback).
-SIMULATE_LOCAL_IPS = {"10.170.42.7", "192.168.1.50", "127.0.0.1"}
+SIMULATE_IP_MAP = {"10.170.42.7": "wwan0", "192.168.1.50": "wlan0", "127.0.0.1": "lo"}
 
 # (proto, remote_ip, remote_port, ~out bytes, ~in bytes, mean seconds between)
 _FAKE_TEMPLATES = [
@@ -161,8 +161,8 @@ class FakeFlowSource:
         self._next_ct_id = 1000
         self.running = False
 
-    def local_ips(self) -> set[str]:
-        return set(SIMULATE_LOCAL_IPS)
+    def ip_map(self) -> dict[str, str]:
+        return dict(SIMULATE_IP_MAP)
 
     def setup(self) -> list[str]:
         return []

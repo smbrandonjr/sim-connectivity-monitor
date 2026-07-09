@@ -186,21 +186,21 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
         from sim_monitor.traffic.sources import FakeFlowSource
 
         traffic_source = FakeFlowSource()
-        traffic_local_ips = traffic_source.local_ips
+        traffic_ip_map = traffic_source.ip_map
         traffic_backend = "simulate"
     else:
-        from sim_monitor.system.netifaces import list_local_ips
+        from sim_monitor.system.netifaces import list_ip_interface_map
         from sim_monitor.traffic.sources import ConntrackSource
 
         traffic_source = ConntrackSource()
-        traffic_local_ips = list_local_ips
+        traffic_ip_map = list_ip_interface_map
         traffic_backend = "conntrack"
     traffic = TrafficCollector(
         db=app.db,
         events=app.events,
         get_config=lambda: effective_traffic_config(app.db, app.config.traffic),
         source=traffic_source,
-        local_ips=traffic_local_ips,
+        ip_interfaces=traffic_ip_map,
         backend_name=traffic_backend,
     )
     traffic_thread = threading.Thread(

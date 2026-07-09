@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS traffic_flows (
     remote_port INTEGER,             -- NULL for port-less protos (icmp)
     local_ip TEXT,
     local_port INTEGER,
+    interface TEXT,                  -- iface the flow rode (from local_ip at capture)
     bytes_sent INTEGER NOT NULL DEFAULT 0,   -- from this device (orig side for fwd)
     bytes_recv INTEGER NOT NULL DEFAULT 0,
     packets_sent INTEGER NOT NULL DEFAULT 0,
@@ -217,6 +218,9 @@ class Database:
         mcols = {r["name"] for r in self._conn.execute("PRAGMA table_info(monitor_results)")}
         if "interface" not in mcols:
             self._conn.execute("ALTER TABLE monitor_results ADD COLUMN interface TEXT")
+        tcols = {r["name"] for r in self._conn.execute("PRAGMA table_info(traffic_flows)")}
+        if "interface" not in tcols:
+            self._conn.execute("ALTER TABLE traffic_flows ADD COLUMN interface TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -832,7 +836,7 @@ class Database:
     # ── traffic flow audit (conntrack-fed) ───────────────────────────────
     _TRAFFIC_COLS = (
         "first_seen", "last_seen", "proto", "direction",
-        "remote_ip", "remote_port", "local_ip", "local_port",
+        "remote_ip", "remote_port", "local_ip", "local_port", "interface",
         "bytes_sent", "bytes_recv", "packets_sent", "packets_recv", "active",
     )
 
@@ -886,6 +890,7 @@ class Database:
         proto: str | None,
         direction: str | None,
         active: bool | None,
+        interface: str | None = None,
     ) -> tuple[str, list[Any]]:
         clauses: list[str] = []
         args: list[Any] = []
@@ -913,6 +918,9 @@ class Database:
         if direction:
             clauses.append("direction = ?")
             args.append(direction)
+        if interface:
+            clauses.append("interface = ?")
+            args.append(interface)
         if active is not None:
             clauses.append("active = ?")
             args.append(int(active))
@@ -928,11 +936,14 @@ class Database:
         proto: str | None = None,
         direction: str | None = None,
         active: bool | None = None,
+        interface: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
         """Filtered flows (newest first) + the total match count for paging."""
-        where, args = self._traffic_where(t0, t1, ip, port, proto, direction, active)
+        where, args = self._traffic_where(
+            t0, t1, ip, port, proto, direction, active, interface
+        )
         with self._lock:
             total = self._conn.execute(
                 f"SELECT COUNT(*) AS n FROM traffic_flows{where}",  # noqa: S608
@@ -948,8 +959,9 @@ class Database:
     def traffic_summary(
         self, t0: float | None = None, t1: float | None = None, top_n: int = 10
     ) -> dict[str, Any]:
-        """Aggregates for the audit view: totals by direction, top remote hosts
-        and service ports by volume, live-flow and distinct-remote counts."""
+        """Aggregates for the audit view: totals by direction and by interface,
+        top remote hosts and service ports by volume, live-flow and
+        distinct-remote counts."""
         where, args = self._traffic_where(t0, t1, None, None, None, None, None)
         with self._lock:
             totals = {
@@ -965,6 +977,17 @@ class Database:
                     args,
                 )
             }
+            by_interface = [
+                dict(r)
+                for r in self._conn.execute(
+                    f"SELECT interface, COUNT(*) AS flows,"  # noqa: S608
+                    f" SUM(bytes_sent) AS bytes_sent, SUM(bytes_recv) AS bytes_recv"
+                    f" FROM traffic_flows{where}"
+                    " GROUP BY interface"
+                    " ORDER BY SUM(bytes_sent) + SUM(bytes_recv) DESC",
+                    args,
+                )
+            ]
             top_remotes = [
                 dict(r)
                 for r in self._conn.execute(
@@ -1003,6 +1026,7 @@ class Database:
             ).fetchone()["n"]
         return {
             "totals": totals,
+            "by_interface": by_interface,
             "top_remotes": top_remotes,
             "top_ports": top_ports,
             "active_flows": active_flows,

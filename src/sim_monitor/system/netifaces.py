@@ -43,27 +43,30 @@ def parse_up_interfaces(data: list[dict]) -> list[str]:
     return out
 
 
-def parse_local_ips(data: list[dict]) -> set[str]:
-    """Pure: every address assigned to any interface (v4+v6, loopback too).
-    Used to orient conntrack flows as inbound/outbound relative to this host."""
-    ips: set[str] = set()
+def parse_ip_interface_map(data: list[dict]) -> dict[str, str]:
+    """Pure: every address assigned to any interface (v4+v6, loopback too),
+    mapped to its interface name. Used to orient conntrack flows as inbound/
+    outbound relative to this host AND attribute each flow to the interface
+    it rode (cellular vs wifi vs ethernet)."""
+    ips: dict[str, str] = {}
     for link in data:
+        name = link.get("ifname")
         for a in link.get("addr_info", []):
             ip = a.get("local")
-            if ip:
-                ips.add(ip)
+            if ip and name:
+                ips[ip] = name
     return ips
 
 
-def list_local_ips(runner=proc.run) -> set[str]:
-    """All local addresses, best-effort. Empty if `ip` is absent."""
+def list_ip_interface_map(runner=proc.run) -> dict[str, str]:
+    """local address -> interface name, best-effort. Empty if `ip` is absent."""
     try:
         data = json.loads(runner(["ip", "-j", "addr", "show"], timeout=5) or "[]")
     except Exception:  # noqa: BLE001 - no `ip` / non-Linux -> nothing to report
-        return set()
+        return {}
     if not isinstance(data, list):
-        return set()
-    return parse_local_ips(data)
+        return {}
+    return parse_ip_interface_map(data)
 
 
 def list_up_interfaces(runner=proc.run) -> list[str]:

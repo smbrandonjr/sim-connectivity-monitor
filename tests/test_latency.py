@@ -103,6 +103,16 @@ class TestNetifaces:
             raise OSError("no ip")
         assert netifaces.list_up_interfaces(runner=boom) == []
 
+    def test_ip_interface_map_includes_all_addresses(self):
+        m = netifaces.parse_ip_interface_map(_IP_JSON)
+        assert m["10.170.42.7"] == "wwan0"
+        assert m["127.0.0.1"] == "lo"          # loopback kept (locality check)
+        assert m["fe80::1"] == "wlan0"         # v6 too
+        assert m["10.0.0.9"] == "eth1"         # down ifaces still own their IPs
+        assert netifaces.list_ip_interface_map(
+            runner=lambda *a, **k: (_ for _ in ()).throw(OSError())
+        ) == {}
+
 
 # ── pure aggregation (bucketing + summarize) ─────────────────────────────────
 

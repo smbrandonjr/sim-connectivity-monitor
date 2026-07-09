@@ -577,7 +577,8 @@ def traffic_flows():
     """Audited network flows, newest first. Query params: `from`/`to` (epoch
     seconds, matched by overlap so long-lived flows count), `ip` (exact or
     with a * wildcard; matches either endpoint), `port` (either endpoint),
-    `proto`, `direction` (out/in/fwd/local), `active` (1/0), limit/offset."""
+    `proto`, `direction` (out/in/fwd/local), `interface` (as attributed at
+    capture time), `active` (1/0), limit/offset."""
     args = request.args
     active_arg = args.get("active")
     flows, total = sim().db.query_traffic_flows(
@@ -587,6 +588,7 @@ def traffic_flows():
         port=args.get("port", type=int),
         proto=args.get("proto") or None,
         direction=args.get("direction") or None,
+        interface=args.get("interface") or None,
         active=None if active_arg in (None, "") else active_arg in ("1", "true"),
         limit=min(args.get("limit", default=100, type=int), 500),
         offset=max(args.get("offset", default=0, type=int), 0),

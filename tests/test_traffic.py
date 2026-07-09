@@ -197,6 +197,20 @@ class TestTrafficDb:
         _, n = db.query_traffic_flows(direction="in")
         assert n == 1
 
+    def test_interface_filter_and_breakdown(self, db):
+        db.add_traffic_flow(_row(interface="wwan0", bytes_sent=1000))
+        db.add_traffic_flow(_row(interface="wwan0", bytes_sent=500))
+        db.add_traffic_flow(_row(interface="wlan0", bytes_sent=10,
+                                 direction="in", remote_ip="192.168.1.9"))
+        db.add_traffic_flow(_row(interface=None, direction="fwd"))
+        _, n = db.query_traffic_flows(interface="wwan0")
+        assert n == 2
+        by_iface = {r["interface"]: r for r in db.traffic_summary()["by_interface"]}
+        assert by_iface["wwan0"]["bytes_sent"] == 1500
+        assert by_iface["wwan0"]["flows"] == 2
+        assert by_iface["wlan0"]["flows"] == 1
+        assert None in by_iface  # unattributed (forwarded) still counted
+
     def test_window_overlap(self, db):
         db.add_traffic_flow(_row(first_seen=100, last_seen=200))
         # Long-lived flow spanning the whole window still matches.
@@ -301,7 +315,7 @@ def collector(db):
         events=EventLog(db),
         get_config=lambda: config,
         source=src,
-        local_ips=lambda: {"10.0.0.5"},
+        ip_interfaces=lambda: {"10.0.0.5": "wwan0"},
         backend_name="test",
         wall_clock=lambda: clock["wall"],
         monotonic=lambda: clock["mono"],
@@ -319,6 +333,7 @@ class TestCollector:
         r = rows[0]
         assert r["active"] == 0
         assert r["direction"] == "out"
+        assert r["interface"] == "wwan0"  # attributed from local_ip at capture
         assert r["first_seen"] == pytest.approx(990.0)  # ts - delta_time
         assert r["last_seen"] == pytest.approx(1000.0)
 
@@ -380,7 +395,8 @@ class TestCollector:
         src = ScriptedSource()
         col = TrafficCollector(
             db=db, events=EventLog(db), get_config=TrafficConfig,
-            source=src, local_ips=lambda: {"10.0.0.5"}, backend_name="test",
+            source=src, ip_interfaces=lambda: {"10.0.0.5": "wwan0"},
+            backend_name="test",
         )
         col.tick()
         _, active = db.query_traffic_flows(active=True)

@@ -615,7 +615,7 @@ class TestTrafficApi:
         base = {
             "first_seen": 1000.0, "last_seen": 1010.0, "proto": "tcp",
             "direction": "out", "remote_ip": "1.2.3.4", "remote_port": 443,
-            "local_ip": "10.0.0.5", "local_port": 40000,
+            "local_ip": "10.0.0.5", "local_port": 40000, "interface": "wwan0",
             "bytes_sent": 100, "bytes_recv": 200,
             "packets_sent": 2, "packets_recv": 3, "active": 0,
         }
@@ -625,7 +625,7 @@ class TestTrafficApi:
     def test_flows_filtering(self, sim, client):
         sim.db.add_traffic_flow(self._flow())
         sim.db.add_traffic_flow(self._flow(remote_ip="5.6.7.8", proto="udp",
-                                           remote_port=53))
+                                           remote_port=53, interface="wlan0"))
         data = client.get("/api/traffic/flows.json").get_json()
         assert data["total"] == 2
         data = client.get("/api/traffic/flows.json?ip=1.2.3.4").get_json()
@@ -633,12 +633,15 @@ class TestTrafficApi:
         assert data["flows"][0]["remote_port"] == 443
         data = client.get("/api/traffic/flows.json?port=53&proto=udp").get_json()
         assert data["total"] == 1
+        data = client.get("/api/traffic/flows.json?interface=wlan0").get_json()
+        assert data["total"] == 1 and data["flows"][0]["interface"] == "wlan0"
 
     def test_summary(self, sim, client):
         sim.db.add_traffic_flow(self._flow(bytes_sent=1000))
         data = client.get("/api/traffic/summary.json").get_json()
         assert data["totals"]["out"]["bytes_sent"] == 1000
         assert data["top_remotes"][0]["remote_ip"] == "1.2.3.4"
+        assert data["by_interface"][0]["interface"] == "wwan0"
         assert "status" in data
 
     def test_config_roundtrip(self, sim, client):

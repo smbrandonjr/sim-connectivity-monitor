@@ -17,6 +17,7 @@
   let portFilter = "";
   let proto = "";
   let direction = "";
+  let ifaceFilter = "";
   let liveOnly = false;
 
   let flows: any[] = [];
@@ -43,6 +44,7 @@
           port: Number.isInteger(port) ? port : undefined,
           proto: proto || undefined,
           direction: direction || undefined,
+          interface: ifaceFilter || undefined,
           active: liveOnly ? true : undefined,
           limit: PAGE_SIZE,
           offset: page * PAGE_SIZE,
@@ -67,7 +69,7 @@
     clearTimeout(debounce);
     debounce = setTimeout(load, 350);
   }
-  $: filtersChanged(range, ipFilter, portFilter, proto, direction, liveOnly);
+  $: filtersChanged(range, ipFilter, portFilter, proto, direction, ifaceFilter, liveOnly);
 
   function goPage(p: number) {
     page = Math.max(0, Math.min(p, Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)));
@@ -85,6 +87,12 @@
   $: flowCount = Object.values(totals).reduce((a: number, t: any) => a + (t.flows ?? 0), 0);
   $: fwdBytes = (totals.fwd?.bytes_sent ?? 0) + (totals.fwd?.bytes_recv ?? 0);
   $: st = summary?.status ?? null;
+  // Interfaces seen in the window; keep the current selection listed even if
+  // it has no flows right now so the select doesn't snap back.
+  $: ifaces = [...new Set(
+    [...(summary?.by_interface ?? []).map((r: any) => r.interface).filter(Boolean),
+     ...(ifaceFilter ? [ifaceFilter] : [])],
+  )];
 
   // ── audit settings (auto-saved) ─────────────────────────────────────────
   let cfg: any = null;
@@ -204,6 +212,10 @@
       <option value="fwd">forwarded</option>
       <option value="local">local</option>
     </select>
+    <select class="ui-select" style="width:auto" bind:value={ifaceFilter} title="interface">
+      <option value="">any interface</option>
+      {#each ifaces as i (i)}<option value={i}>{i}</option>{/each}
+    </select>
     <label class="toggle"><input type="checkbox" bind:checked={liveOnly} /> <span>live only</span></label>
     <span style="flex:1"></span>
     <div class="range-tabs">
@@ -229,8 +241,8 @@
     <table>
       <thead>
         <tr>
-          <th>Last seen</th><th>Dir</th><th>Proto</th><th>Remote</th><th>Local</th>
-          <th>Sent</th><th>Recv</th><th>Pkts</th><th>Duration</th>
+          <th>Last seen</th><th>Dir</th><th>Iface</th><th>Proto</th><th>Remote</th>
+          <th>Local</th><th>Sent</th><th>Recv</th><th>Pkts</th><th>Duration</th>
         </tr>
       </thead>
       <tbody>
@@ -241,6 +253,7 @@
               <span class="badge {dirClass(f.direction)}">{f.direction}</span>
               {#if f.active}<span class="badge lime" title="flow still open">live</span>{/if}
             </td>
+            <td class="mono">{f.interface ?? "—"}</td>
             <td class="mono">{f.proto}</td>
             <td class="mono nowrap">{f.remote_ip}{f.remote_port != null ? `:${f.remote_port}` : ""}</td>
             <td class="mono nowrap">
@@ -256,7 +269,7 @@
             <td class="nowrap">{dur(f.last_seen - f.first_seen)}</td>
           </tr>
         {:else}
-          <tr><td colspan="9" class="muted">No flows match. Traffic appears here as connections close (live ones within {cfg?.snapshot_interval_seconds ?? 30}s).</td></tr>
+          <tr><td colspan="10" class="muted">No flows match. Traffic appears here as connections close (live ones within {cfg?.snapshot_interval_seconds ?? 30}s).</td></tr>
         {/each}
       </tbody>
     </table>
@@ -264,6 +277,27 @@
 </section>
 
 <div class="cards two">
+  <section class="ui-card">
+    <h2>By interface</h2>
+    <p class="muted hint">Volume per interface in the selected window.</p>
+    <table>
+      <thead><tr><th>Interface</th><th>Flows</th><th>Sent</th><th>Recv</th></tr></thead>
+      <tbody>
+        {#each summary?.by_interface ?? [] as r (r.interface ?? "—")}
+          <tr>
+            <td class="mono clicky" title="filter to this interface"
+                on:click={() => (ifaceFilter = r.interface ?? "")}>{r.interface ?? "—"}</td>
+            <td>{r.flows}</td>
+            <td class="nowrap">{bytes(r.bytes_sent)}</td>
+            <td class="nowrap">{bytes(r.bytes_recv)}</td>
+          </tr>
+        {:else}
+          <tr><td colspan="4" class="muted">Nothing yet.</td></tr>
+        {/each}
+      </tbody>
+    </table>
+  </section>
+
   <section class="ui-card">
     <h2>Top remote hosts</h2>
     <p class="muted hint">By total volume in the selected window.</p>

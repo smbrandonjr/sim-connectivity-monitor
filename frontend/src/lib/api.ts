@@ -175,7 +175,7 @@ export const api = {
 
   trafficFlows: (params: {
     from?: number; to?: number; ip?: string; port?: number | null;
-    proto?: string; direction?: string; active?: boolean;
+    proto?: string; direction?: string; interface?: string; active?: boolean;
     limit?: number; offset?: number;
   } = {}) => {
     const q = new URLSearchParams();
@@ -185,6 +185,7 @@ export const api = {
     if (params.port != null) q.set("port", String(params.port));
     if (params.proto) q.set("proto", params.proto);
     if (params.direction) q.set("direction", params.direction);
+    if (params.interface) q.set("interface", params.interface);
     if (params.active != null) q.set("active", params.active ? "1" : "0");
     q.set("limit", String(params.limit ?? 50));
     q.set("offset", String(params.offset ?? 0));

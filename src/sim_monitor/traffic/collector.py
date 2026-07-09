@@ -51,7 +51,7 @@ class TrafficCollector:
         events: EventLog,
         get_config: Callable[[], TrafficConfig],
         source,
-        local_ips: Callable[[], set[str]],
+        ip_interfaces: Callable[[], dict[str, str]],
         backend_name: str = "conntrack",
         wall_clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
@@ -60,11 +60,12 @@ class TrafficCollector:
         self.events = events
         self.get_config = get_config
         self.source = source
-        self.local_ips = local_ips
+        self.ip_interfaces = ip_interfaces
         self.backend_name = backend_name
         self._wall_clock = wall_clock
         self._monotonic = monotonic
         self._local: set[str] = set()
+        self._ifmap: dict[str, str] = {}  # local ip -> interface name
         self._active: dict[int, int] = {}  # kernel flow id -> traffic_flows row id
         self._started = False
         self._warned = False
@@ -165,9 +166,10 @@ class TrafficCollector:
         self._write_status(running=False)
 
     def _refresh_local(self) -> None:
-        ips = self.local_ips()
-        if ips:
-            self._local = ips
+        ifmap = self.ip_interfaces()
+        if ifmap:
+            self._ifmap = ifmap
+            self._local = set(ifmap)
 
     # ── flow bookkeeping ─────────────────────────────────────────────────
 
@@ -181,6 +183,11 @@ class TrafficCollector:
             "proto": ev.proto, "direction": cls.direction,
             "remote_ip": cls.remote_ip, "remote_port": cls.remote_port,
             "local_ip": cls.local_ip, "local_port": cls.local_port,
+            # Which interface the flow rode, resolved from the local address at
+            # capture time (cellular IPs change per session — attribution has
+            # to happen now, not at query time). Unresolvable (e.g. forwarded
+            # flows, where local_ip is the LAN client) stays NULL.
+            "interface": self._ifmap.get(cls.local_ip),
             "bytes_sent": cls.bytes_sent, "bytes_recv": cls.bytes_recv,
             "packets_sent": cls.packets_sent, "packets_recv": cls.packets_recv,
             "active": int(active),
