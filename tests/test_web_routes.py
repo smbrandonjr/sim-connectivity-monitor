@@ -635,6 +635,20 @@ class TestTrafficApi:
         assert data["total"] == 1
         data = client.get("/api/traffic/flows.json?interface=wlan0").get_json()
         assert data["total"] == 1 and data["flows"][0]["interface"] == "wlan0"
+        data = client.get("/api/traffic/flows.json?ip=!5.6.7.8").get_json()
+        assert data["total"] == 1 and data["flows"][0]["remote_ip"] == "1.2.3.4"
+        data = client.get(
+            "/api/traffic/flows.json?sort=remote_port&order=asc"
+        ).get_json()
+        assert [f["remote_port"] for f in data["flows"]] == [53, 443]
+
+    def test_summary_respects_filters(self, sim, client):
+        sim.db.add_traffic_flow(self._flow(bytes_sent=1000))
+        sim.db.add_traffic_flow(self._flow(remote_ip="5.6.7.8", interface="wlan0",
+                                           bytes_sent=7))
+        data = client.get("/api/traffic/summary.json?interface=wwan0").get_json()
+        assert data["totals"]["out"]["bytes_sent"] == 1000
+        assert [r["remote_ip"] for r in data["top_remotes"]] == ["1.2.3.4"]
 
     def test_summary(self, sim, client):
         sim.db.add_traffic_flow(self._flow(bytes_sent=1000))

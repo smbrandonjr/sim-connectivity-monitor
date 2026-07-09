@@ -197,6 +197,61 @@ class TestTrafficDb:
         _, n = db.query_traffic_flows(direction="in")
         assert n == 1
 
+    def test_ip_spec_includes_excludes_wildcards(self, db):
+        db.add_traffic_flow(_row(remote_ip="192.168.86.73"))
+        db.add_traffic_flow(_row(remote_ip="192.168.86.25"))
+        db.add_traffic_flow(_row(remote_ip="8.8.8.8"))
+        _, n = db.query_traffic_flows(ip="192.168.86.*")
+        assert n == 2
+        _, n = db.query_traffic_flows(ip="192.168.86.*, !192.168.86.73")
+        assert n == 1
+        _, n = db.query_traffic_flows(ip="!192.168.86.*")
+        assert n == 1
+        _, n = db.query_traffic_flows(ip="8.8.8.8, 192.168.86.25")
+        assert n == 2
+
+    def test_port_spec_lists_ranges_excludes(self, db):
+        for p in (53, 443, 5353, 8080):
+            db.add_traffic_flow(_row(remote_port=p, local_port=40000))
+        _, n = db.query_traffic_flows(port="443, 53")
+        assert n == 2
+        _, n = db.query_traffic_flows(port="!5353")
+        assert n == 3
+        _, n = db.query_traffic_flows(port="1-1024")
+        assert n == 2
+        _, n = db.query_traffic_flows(port="1-1024, 8080")
+        assert n == 3
+        _, n = db.query_traffic_flows(port=8080)  # plain int still accepted
+        assert n == 1
+        _, n = db.query_traffic_flows(port="junk")  # non-ports ignored
+        assert n == 4
+
+    def test_sorting_whitelist(self, db):
+        db.add_traffic_flow(_row(bytes_sent=10, last_seen=1))
+        db.add_traffic_flow(_row(bytes_sent=30, last_seen=2))
+        db.add_traffic_flow(_row(bytes_sent=20, last_seen=3))
+        rows, _ = db.query_traffic_flows(sort="bytes_sent")
+        assert [r["bytes_sent"] for r in rows] == [30, 20, 10]
+        rows, _ = db.query_traffic_flows(sort="bytes_sent", order="asc")
+        assert [r["bytes_sent"] for r in rows] == [10, 20, 30]
+        # Unknown sort keys / orders fall back to last_seen desc, never SQL.
+        rows, _ = db.query_traffic_flows(sort="evil; DROP TABLE", order="bad")
+        assert [r["last_seen"] for r in rows] == [3, 2, 1]
+
+    def test_summary_respects_filters(self, db):
+        db.add_traffic_flow(_row(remote_ip="1.1.1.1", interface="wwan0",
+                                 bytes_sent=100))
+        db.add_traffic_flow(_row(remote_ip="9.9.9.9", interface="wlan0",
+                                 bytes_sent=50, remote_port=53, proto="udp"))
+        s = db.traffic_summary(interface="wwan0")
+        assert s["totals"]["out"]["bytes_sent"] == 100
+        assert [r["remote_ip"] for r in s["top_remotes"]] == ["1.1.1.1"]
+        assert [r["interface"] for r in s["by_interface"]] == ["wwan0"]
+        s = db.traffic_summary(ip="!1.1.1.1")
+        assert [r["remote_ip"] for r in s["top_remotes"]] == ["9.9.9.9"]
+        s = db.traffic_summary(port="53")
+        assert s["distinct_remotes"] == 1
+
     def test_interface_filter_and_breakdown(self, db):
         db.add_traffic_flow(_row(interface="wwan0", bytes_sent=1000))
         db.add_traffic_flow(_row(interface="wwan0", bytes_sent=500))

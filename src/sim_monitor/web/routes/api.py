@@ -572,24 +572,37 @@ def http_checks_config_put():
     return jsonify({"ok": True})
 
 
+def _traffic_filters(args) -> dict:
+    """Shared filter params for the flow list and the summary facets, so both
+    always reflect the same narrowing. `ip`/`port` are specs (comma-separated
+    terms, '!' excludes, '*' IP wildcards, a-b port ranges)."""
+    active_arg = args.get("active")
+    return {
+        "t0": args.get("from", type=float),
+        "t1": args.get("to", type=float),
+        "ip": (args.get("ip") or "").strip() or None,
+        "port": (args.get("port") or "").strip() or None,
+        "proto": args.get("proto") or None,
+        "direction": args.get("direction") or None,
+        "interface": args.get("interface") or None,
+        "active": None if active_arg in (None, "") else active_arg in ("1", "true"),
+    }
+
+
 @bp.get("/traffic/flows.json")
 def traffic_flows():
-    """Audited network flows, newest first. Query params: `from`/`to` (epoch
-    seconds, matched by overlap so long-lived flows count), `ip` (exact or
-    with a * wildcard; matches either endpoint), `port` (either endpoint),
-    `proto`, `direction` (out/in/fwd/local), `interface` (as attributed at
-    capture time), `active` (1/0), limit/offset."""
+    """Audited network flows. Filters: `from`/`to` (epoch seconds, matched by
+    overlap so long-lived flows count), `ip`/`port` specs (see
+    _traffic_filters), `proto`, `direction` (out/in/fwd/local), `interface`
+    (as attributed at capture time), `active` (1/0). `sort` (last_seen,
+    first_seen, bytes_sent, bytes_recv, bytes, packets, duration, remote_ip,
+    remote_port, proto, direction, interface) + `order` (asc/desc),
+    limit/offset."""
     args = request.args
-    active_arg = args.get("active")
     flows, total = sim().db.query_traffic_flows(
-        t0=args.get("from", type=float),
-        t1=args.get("to", type=float),
-        ip=(args.get("ip") or "").strip() or None,
-        port=args.get("port", type=int),
-        proto=args.get("proto") or None,
-        direction=args.get("direction") or None,
-        interface=args.get("interface") or None,
-        active=None if active_arg in (None, "") else active_arg in ("1", "true"),
+        **_traffic_filters(args),
+        sort=args.get("sort") or "last_seen",
+        order=args.get("order") or "desc",
         limit=min(args.get("limit", default=100, type=int), 500),
         offset=max(args.get("offset", default=0, type=int), 0),
     )
@@ -598,12 +611,13 @@ def traffic_flows():
 
 @bp.get("/traffic/summary.json")
 def traffic_summary():
-    """Aggregates for the traffic audit view (totals by direction, top remote
-    hosts/ports by volume) plus the collector's runtime status."""
+    """Aggregates for the traffic audit view (totals by direction/interface,
+    top remote hosts/ports by volume) plus the collector's runtime status.
+    Takes the same filters as /traffic/flows.json, and `top` for list size."""
     db = sim().db
     summary = db.traffic_summary(
-        t0=request.args.get("from", type=float),
-        t1=request.args.get("to", type=float),
+        **_traffic_filters(request.args),
+        top_n=min(request.args.get("top", default=25, type=int), 100),
     )
     summary["status"] = db.get_setting("traffic_status")
     summary["server_time"] = time.time()

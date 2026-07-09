@@ -1,6 +1,26 @@
 // Thin client for the sim-monitor JSON API.
 import { toast } from "./toast";
 
+// Filters shared by the traffic flow list and summary facets. `ip`/`port` are
+// specs: comma-separated terms, "!" excludes, "*" IP wildcards, a-b port ranges.
+type TrafficFilters = {
+  from?: number; to?: number; ip?: string; port?: string;
+  proto?: string; direction?: string; interface?: string; active?: boolean;
+};
+
+function trafficQuery(params: TrafficFilters): URLSearchParams {
+  const q = new URLSearchParams();
+  if (params.from != null) q.set("from", String(Math.floor(params.from)));
+  if (params.to != null) q.set("to", String(Math.floor(params.to)));
+  if (params.ip) q.set("ip", params.ip);
+  if (params.port) q.set("port", params.port);
+  if (params.proto) q.set("proto", params.proto);
+  if (params.direction) q.set("direction", params.direction);
+  if (params.interface) q.set("interface", params.interface);
+  if (params.active != null) q.set("active", params.active ? "1" : "0");
+  return q;
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path, { cache: "no-store" });
   if (!res.ok) throw new Error(`${path}: ${res.status}`);
@@ -173,30 +193,21 @@ export const api = {
     }),
   markTcpRead: () => fetch("/api/tcp/mark-read", { method: "POST" }),
 
-  trafficFlows: (params: {
-    from?: number; to?: number; ip?: string; port?: number | null;
-    proto?: string; direction?: string; interface?: string; active?: boolean;
-    limit?: number; offset?: number;
+  trafficFlows: (params: TrafficFilters & {
+    sort?: string; order?: string; limit?: number; offset?: number;
   } = {}) => {
-    const q = new URLSearchParams();
-    if (params.from != null) q.set("from", String(Math.floor(params.from)));
-    if (params.to != null) q.set("to", String(Math.floor(params.to)));
-    if (params.ip) q.set("ip", params.ip);
-    if (params.port != null) q.set("port", String(params.port));
-    if (params.proto) q.set("proto", params.proto);
-    if (params.direction) q.set("direction", params.direction);
-    if (params.interface) q.set("interface", params.interface);
-    if (params.active != null) q.set("active", params.active ? "1" : "0");
+    const q = trafficQuery(params);
+    if (params.sort) q.set("sort", params.sort);
+    if (params.order) q.set("order", params.order);
     q.set("limit", String(params.limit ?? 50));
     q.set("offset", String(params.offset ?? 0));
     return getJSON<{ flows: any[]; total: number; server_time: number }>(
       `/api/traffic/flows.json?${q.toString()}`,
     );
   },
-  trafficSummary: (from?: number, to?: number) => {
-    const q = new URLSearchParams();
-    if (from != null) q.set("from", String(Math.floor(from)));
-    if (to != null) q.set("to", String(Math.floor(to)));
+  trafficSummary: (params: TrafficFilters & { top?: number } = {}) => {
+    const q = trafficQuery(params);
+    if (params.top != null) q.set("top", String(params.top));
     return getJSON<any>(`/api/traffic/summary.json?${q.toString()}`);
   },
   trafficConfig: () => getJSON<any>("/api/traffic-config.json"),

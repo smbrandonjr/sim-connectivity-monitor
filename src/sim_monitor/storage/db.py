@@ -882,11 +882,75 @@ class Database:
             self._conn.commit()
 
     @staticmethod
+    def _spec_terms(spec: str) -> list[tuple[bool, str]]:
+        """Split a filter spec into (exclude, term) pairs. Terms are comma/
+        semicolon-separated; a leading '!' negates: "192.168.*, !192.168.1.9"
+        -> [(False, "192.168.*"), (True, "192.168.1.9")]."""
+        out: list[tuple[bool, str]] = []
+        for term in spec.replace(";", ",").split(","):
+            term = term.strip()
+            if term.startswith("!"):
+                term = term[1:].strip()
+                if term:
+                    out.append((True, term))
+            elif term:
+                out.append((False, term))
+        return out
+
+    @staticmethod
+    def _ip_clause(term: str) -> tuple[str, list[Any]]:
+        """SQL matching one IP term against either endpoint; '*' wildcards."""
+        if "*" in term:
+            pat = term.replace("*", "%")
+            return "(remote_ip LIKE ? OR local_ip LIKE ?)", [pat, pat]
+        return "(remote_ip = ? OR local_ip = ?)", [term, term]
+
+    @staticmethod
+    def _port_clause(term: str) -> tuple[str, list[Any]] | None:
+        """SQL matching one port term (a number or an a-b range) against either
+        endpoint; None for terms that aren't ports (silently ignored)."""
+        lo, dash, hi = term.partition("-")
+        if dash and lo.strip().isdigit() and hi.strip().isdigit():
+            a, b = int(lo), int(hi)
+            return (
+                "(remote_port BETWEEN ? AND ? OR local_port BETWEEN ? AND ?)",
+                [a, b, a, b],
+            )
+        if term.isdigit():
+            p = int(term)
+            return "(remote_port = ? OR local_port = ?)", [p, p]
+        return None
+
+    @classmethod
+    def _spec_clauses(
+        cls, spec: str, make_clause
+    ) -> tuple[list[str], list[Any]]:
+        """Fold a spec into SQL: includes OR together, excludes each AND NOT."""
+        clauses: list[str] = []
+        args: list[Any] = []
+        includes: list[tuple[str, list[Any]]] = []
+        for exclude, term in cls._spec_terms(spec):
+            made = make_clause(term)
+            if made is None:
+                continue
+            if exclude:
+                clauses.append(f"NOT {made[0]}")
+                args += made[1]
+            else:
+                includes.append(made)
+        if includes:
+            clauses.append("(" + " OR ".join(c for c, _ in includes) + ")")
+            for _, a in includes:
+                args += a
+        return clauses, args
+
+    @classmethod
     def _traffic_where(
+        cls,
         t0: float | None,
         t1: float | None,
         ip: str | None,
-        port: int | None,
+        port: int | str | None,
         proto: str | None,
         direction: str | None,
         active: bool | None,
@@ -902,16 +966,13 @@ class Database:
             clauses.append("first_seen <= ?")
             args.append(t1)
         if ip:
-            if "*" in ip:  # prefix/suffix wildcard, e.g. "192.168.1.*"
-                pat = ip.replace("*", "%")
-                clauses.append("(remote_ip LIKE ? OR local_ip LIKE ?)")
-                args += [pat, pat]
-            else:
-                clauses.append("(remote_ip = ? OR local_ip = ?)")
-                args += [ip, ip]
-        if port is not None:
-            clauses.append("(remote_port = ? OR local_port = ?)")
-            args += [port, port]
+            c, a = cls._spec_clauses(ip, cls._ip_clause)
+            clauses += c
+            args += a
+        if port is not None and str(port).strip():
+            c, a = cls._spec_clauses(str(port), cls._port_clause)
+            clauses += c
+            args += a
         if proto:
             clauses.append("proto = ?")
             args.append(proto)
@@ -927,23 +988,45 @@ class Database:
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         return where, args
 
+    # Whitelisted sort keys -> SQL expressions (user input never reaches SQL).
+    _FLOW_SORTS = {
+        "last_seen": "last_seen",
+        "first_seen": "first_seen",
+        "bytes_sent": "bytes_sent",
+        "bytes_recv": "bytes_recv",
+        "bytes": "bytes_sent + bytes_recv",
+        "packets": "packets_sent + packets_recv",
+        "duration": "last_seen - first_seen",
+        "remote_ip": "remote_ip",
+        "remote_port": "remote_port",
+        "proto": "proto",
+        "direction": "direction",
+        "interface": "interface",
+    }
+
     def query_traffic_flows(
         self,
         t0: float | None = None,
         t1: float | None = None,
         ip: str | None = None,
-        port: int | None = None,
+        port: int | str | None = None,
         proto: str | None = None,
         direction: str | None = None,
         active: bool | None = None,
         interface: str | None = None,
+        sort: str = "last_seen",
+        order: str = "desc",
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
-        """Filtered flows (newest first) + the total match count for paging."""
+        """Filtered flows + the total match count for paging. `ip`/`port` take
+        specs: comma-separated terms, '!' to exclude, '*' IP wildcards, and
+        a-b port ranges. `sort` is a _FLOW_SORTS key (unknown -> last_seen)."""
         where, args = self._traffic_where(
             t0, t1, ip, port, proto, direction, active, interface
         )
+        sort_expr = self._FLOW_SORTS.get(sort, "last_seen")
+        sql_order = "ASC" if order == "asc" else "DESC"
         with self._lock:
             total = self._conn.execute(
                 f"SELECT COUNT(*) AS n FROM traffic_flows{where}",  # noqa: S608
@@ -951,18 +1034,30 @@ class Database:
             ).fetchone()["n"]
             rows = self._conn.execute(
                 f"SELECT * FROM traffic_flows{where}"  # noqa: S608 — where is parameterized
-                " ORDER BY last_seen DESC, id DESC LIMIT ? OFFSET ?",
+                f" ORDER BY {sort_expr} {sql_order}, id DESC LIMIT ? OFFSET ?",
                 (*args, limit, offset),
             ).fetchall()
         return [dict(r) for r in rows], total
 
     def traffic_summary(
-        self, t0: float | None = None, t1: float | None = None, top_n: int = 10
+        self,
+        t0: float | None = None,
+        t1: float | None = None,
+        ip: str | None = None,
+        port: int | str | None = None,
+        proto: str | None = None,
+        direction: str | None = None,
+        active: bool | None = None,
+        interface: str | None = None,
+        top_n: int = 10,
     ) -> dict[str, Any]:
         """Aggregates for the audit view: totals by direction and by interface,
         top remote hosts and service ports by volume, live-flow and
-        distinct-remote counts."""
-        where, args = self._traffic_where(t0, t1, None, None, None, None, None)
+        distinct-remote counts. Takes the same filters as query_traffic_flows
+        so every facet reflects what the user has narrowed to."""
+        where, args = self._traffic_where(
+            t0, t1, ip, port, proto, direction, active, interface
+        )
         with self._lock:
             totals = {
                 r["direction"]: {

@@ -20,6 +20,25 @@
   let ifaceFilter = "";
   let liveOnly = false;
 
+  // Flow-table sort (server-side; keys match the API's whitelist).
+  let sortKey = "last_seen";
+  let sortDir: "desc" | "asc" = "desc";
+  function setSort(key: string) {
+    if (sortKey === key) {
+      sortDir = sortDir === "desc" ? "asc" : "desc";
+    } else {
+      sortKey = key;
+      sortDir = "desc";
+    }
+    page = 0;
+    load();
+  }
+  // Sort state is passed in (not read from scope) so Svelte re-renders the
+  // header arrows when it changes.
+  function arrow(cur: string, dir: string, key: string): string {
+    return cur === key ? (dir === "desc" ? " ▾" : " ▴") : "";
+  }
+
   let flows: any[] = [];
   let total = 0;
   let page = 0;
@@ -32,27 +51,33 @@
     return r?.seconds != null ? Date.now() / 1000 - r.seconds : undefined;
   }
 
+  function filters() {
+    return {
+      from: windowFrom(),
+      ip: ipFilter.trim() || undefined,
+      port: portFilter.trim() || undefined,
+      proto: proto || undefined,
+      direction: direction || undefined,
+      interface: ifaceFilter || undefined,
+      active: liveOnly ? true : undefined,
+    };
+  }
+
   async function load() {
     loading = true;
-    const from = windowFrom();
-    const port = parseInt(portFilter.trim(), 10);
+    const f = filters();
     try {
-      const [f, s] = await Promise.all([
+      // The summary facets take the same filters, so every card reflects the
+      // current narrowing, not the whole database.
+      const [fl, s] = await Promise.all([
         api.trafficFlows({
-          from,
-          ip: ipFilter.trim() || undefined,
-          port: Number.isInteger(port) ? port : undefined,
-          proto: proto || undefined,
-          direction: direction || undefined,
-          interface: ifaceFilter || undefined,
-          active: liveOnly ? true : undefined,
-          limit: PAGE_SIZE,
-          offset: page * PAGE_SIZE,
+          ...f, sort: sortKey, order: sortDir,
+          limit: PAGE_SIZE, offset: page * PAGE_SIZE,
         }),
-        api.trafficSummary(from),
+        api.trafficSummary({ ...f, top: 25 }),
       ]);
-      flows = f.flows;
-      total = f.total;
+      flows = fl.flows;
+      total = fl.total;
       summary = s;
     } catch {
       /* keep last data */
@@ -94,6 +119,45 @@
      ...(ifaceFilter ? [ifaceFilter] : [])],
   )];
 
+  // ── breakdown-card sorting (client-side over the returned rows) ──────────
+  type CardSort = { key: string; dir: "desc" | "asc" };
+  let ifSort: CardSort = { key: "bytes", dir: "desc" };
+  let remSort: CardSort = { key: "bytes", dir: "desc" };
+  let portSort: CardSort = { key: "bytes", dir: "desc" };
+
+  function toggleCardSort(cur: CardSort, key: string): CardSort {
+    if (cur.key === key) return { key, dir: cur.dir === "desc" ? "asc" : "desc" };
+    return { key, dir: "desc" };
+  }
+  function cardArrow(s: CardSort, key: string): string {
+    return s.key === key ? (s.dir === "desc" ? " ▾" : " ▴") : "";
+  }
+  function sortRows(rows: any[], s: CardSort): any[] {
+    const val = (r: any) =>
+      s.key === "bytes" ? (r.bytes_sent ?? 0) + (r.bytes_recv ?? 0) : r[s.key];
+    const sign = s.dir === "desc" ? -1 : 1;
+    return [...rows].sort((a, b) => {
+      const va = val(a);
+      const vb = val(b);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;  // unknowns sink regardless of direction
+      if (vb == null) return -1;
+      if (typeof va === "string" || typeof vb === "string")
+        return sign * String(va).localeCompare(String(vb));
+      return sign * (va - vb);
+    });
+  }
+  $: ifaceRows = sortRows(summary?.by_interface ?? [], ifSort);
+  $: remoteRows = sortRows(summary?.top_remotes ?? [], remSort);
+  $: portRows = sortRows(summary?.top_ports ?? [], portSort);
+
+  function dirClass(d: string): string {
+    if (d === "out") return "blue";
+    if (d === "in") return "green";
+    if (d === "fwd") return "amber";
+    return "";
+  }
+
   // ── audit settings (auto-saved) ─────────────────────────────────────────
   let cfg: any = null;
   let lastSaved = "";
@@ -126,13 +190,6 @@
   }
   $: scheduleSave(cfg?.enabled, cfg?.snapshot_interval_seconds,
      cfg?.retention_days, cfg?.max_flows, cfg?.include_local);
-
-  function dirClass(d: string): string {
-    if (d === "out") return "blue";
-    if (d === "in") return "green";
-    if (d === "fwd") return "amber";
-    return "";
-  }
 
   onMount(() => {
     loadConfig();
@@ -173,32 +230,14 @@
   </section>
 {/if}
 
-<div class="cards">
-  <section class="ui-card stat">
-    <div class="label">Sent</div>
-    <div class="value">{bytes(deviceSent)}</div>
-  </section>
-  <section class="ui-card stat">
-    <div class="label">Received</div>
-    <div class="value">{bytes(deviceRecv)}</div>
-  </section>
-  <section class="ui-card stat">
-    <div class="label">Flows</div>
-    <div class="value">{flowCount}</div>
-    <div class="sub muted">{summary?.distinct_remotes ?? 0} remote hosts</div>
-  </section>
-  <section class="ui-card stat">
-    <div class="label">Live now</div>
-    <div class="value">{summary?.active_flows ?? 0}</div>
-    {#if fwdBytes > 0}<div class="sub muted">{bytes(fwdBytes)} forwarded</div>{/if}
-  </section>
-</div>
-
 <section class="ui-card">
   <div class="row filters">
-    <input class="ui-input" style="max-width:190px" placeholder="IP (exact or 10.0.0.*)"
+    <input class="ui-input" style="max-width:230px" placeholder="IP: 10.0.*, !192.168.86.73"
+      title="comma-separated; * wildcard; ! excludes; matches either endpoint"
       bind:value={ipFilter} />
-    <input class="ui-input" style="max-width:110px" placeholder="port" bind:value={portFilter} />
+    <input class="ui-input" style="max-width:170px" placeholder="port: 443, !5353, 1-1024"
+      title="comma-separated ports or a-b ranges; ! excludes; matches either endpoint"
+      bind:value={portFilter} />
     <select class="ui-select" style="width:auto" bind:value={proto} title="protocol">
       <option value="">any proto</option>
       <option value="tcp">tcp</option>
@@ -226,30 +265,66 @@
       {/each}
     </div>
   </div>
+  <p class="muted hint">
+    Filters apply to the flow list and every breakdown below. IP/port take
+    comma-separated terms: <span class="mono">!</span> excludes,
+    <span class="mono">*</span> wildcards IPs, <span class="mono">a-b</span> is a port range.
+  </p>
+</section>
 
-  <div class="row" style="margin-top:10px">
+<div class="cards">
+  <section class="ui-card stat">
+    <div class="label">Sent</div>
+    <div class="value">{bytes(deviceSent)}</div>
+  </section>
+  <section class="ui-card stat">
+    <div class="label">Received</div>
+    <div class="value">{bytes(deviceRecv)}</div>
+  </section>
+  <section class="ui-card stat">
+    <div class="label">Flows</div>
+    <div class="value">{flowCount}</div>
+    <div class="sub muted">{summary?.distinct_remotes ?? 0} remote hosts</div>
+  </section>
+  <section class="ui-card stat">
+    <div class="label">Live now</div>
+    <div class="value">{summary?.active_flows ?? 0}</div>
+    {#if fwdBytes > 0}<div class="sub muted">{bytes(fwdBytes)} forwarded</div>{/if}
+  </section>
+</div>
+
+<section class="ui-card">
+  <div class="row">
     <h2 style="flex:1">Flows</h2>
     {#if loading}<span class="muted">loading…</span>{/if}
     {#if total > 0}
       <span class="muted">{rangeStart}–{rangeEnd} of {total}</span>
-      <button class="ui-btn ui-btn-sm" disabled={page === 0} on:click={() => goPage(page - 1)}>‹ newer</button>
-      <button class="ui-btn ui-btn-sm" disabled={page >= pages - 1} on:click={() => goPage(page + 1)}>older ›</button>
+      <button class="ui-btn ui-btn-sm" disabled={page === 0} on:click={() => goPage(page - 1)}>‹ prev</button>
+      <button class="ui-btn ui-btn-sm" disabled={page >= pages - 1} on:click={() => goPage(page + 1)}>next ›</button>
     {/if}
   </div>
 
-  <div style="overflow-x:auto">
+  <div class="scroll">
     <table>
       <thead>
         <tr>
-          <th>Last seen</th><th>Dir</th><th>Iface</th><th>Proto</th><th>Remote</th>
-          <th>Local</th><th>Sent</th><th>Recv</th><th>Pkts</th><th>Duration</th>
+          <th class="sortable" on:click={() => setSort("last_seen")}>Last seen{arrow(sortKey, sortDir, "last_seen")}</th>
+          <th class="sortable" on:click={() => setSort("direction")}>Dir{arrow(sortKey, sortDir, "direction")}</th>
+          <th class="sortable" on:click={() => setSort("interface")}>Iface{arrow(sortKey, sortDir, "interface")}</th>
+          <th class="sortable" on:click={() => setSort("proto")}>Proto{arrow(sortKey, sortDir, "proto")}</th>
+          <th class="sortable" on:click={() => setSort("remote_ip")}>Remote{arrow(sortKey, sortDir, "remote_ip")}</th>
+          <th>Local</th>
+          <th class="sortable r" on:click={() => setSort("bytes_sent")}>Sent{arrow(sortKey, sortDir, "bytes_sent")}</th>
+          <th class="sortable r" on:click={() => setSort("bytes_recv")}>Recv{arrow(sortKey, sortDir, "bytes_recv")}</th>
+          <th class="sortable r" on:click={() => setSort("packets")}>Pkts{arrow(sortKey, sortDir, "packets")}</th>
+          <th class="sortable r" on:click={() => setSort("duration")}>Duration{arrow(sortKey, sortDir, "duration")}</th>
         </tr>
       </thead>
       <tbody>
         {#each flows as f (f.id)}
           <tr>
             <td class="nowrap">{ts(f.last_seen)}</td>
-            <td>
+            <td class="nowrap">
               <span class="badge {dirClass(f.direction)}">{f.direction}</span>
               {#if f.active}<span class="badge lime" title="flow still open">live</span>{/if}
             </td>
@@ -263,10 +338,10 @@
                 {f.local_port != null ? `:${f.local_port}` : "—"}
               {/if}
             </td>
-            <td class="nowrap">{bytes(f.bytes_sent)}</td>
-            <td class="nowrap">{bytes(f.bytes_recv)}</td>
-            <td class="nowrap">{f.packets_sent + f.packets_recv}</td>
-            <td class="nowrap">{dur(f.last_seen - f.first_seen)}</td>
+            <td class="nowrap r">{bytes(f.bytes_sent)}</td>
+            <td class="nowrap r">{bytes(f.bytes_recv)}</td>
+            <td class="nowrap r">{f.packets_sent + f.packets_recv}</td>
+            <td class="nowrap r">{dur(f.last_seen - f.first_seen)}</td>
           </tr>
         {:else}
           <tr><td colspan="10" class="muted">No flows match. Traffic appears here as connections close (live ones within {cfg?.snapshot_interval_seconds ?? 30}s).</td></tr>
@@ -276,69 +351,97 @@
   </div>
 </section>
 
-<div class="cards two">
+<div class="cards breakdown">
   <section class="ui-card">
     <h2>By interface</h2>
-    <p class="muted hint">Volume per interface in the selected window.</p>
-    <table>
-      <thead><tr><th>Interface</th><th>Flows</th><th>Sent</th><th>Recv</th></tr></thead>
-      <tbody>
-        {#each summary?.by_interface ?? [] as r (r.interface ?? "—")}
+    <p class="muted hint">Volume per interface, current filters applied. — = recorded before interface tracking, or forwarded.</p>
+    <div class="scroll">
+      <table>
+        <thead>
           <tr>
-            <td class="mono clicky" title="filter to this interface"
-                on:click={() => (ifaceFilter = r.interface ?? "")}>{r.interface ?? "—"}</td>
-            <td>{r.flows}</td>
-            <td class="nowrap">{bytes(r.bytes_sent)}</td>
-            <td class="nowrap">{bytes(r.bytes_recv)}</td>
+            <th class="sortable" on:click={() => (ifSort = toggleCardSort(ifSort, "interface"))}>Interface{cardArrow(ifSort, "interface")}</th>
+            <th class="sortable r" on:click={() => (ifSort = toggleCardSort(ifSort, "flows"))}>Flows{cardArrow(ifSort, "flows")}</th>
+            <th class="sortable r" on:click={() => (ifSort = toggleCardSort(ifSort, "bytes_sent"))}>Sent{cardArrow(ifSort, "bytes_sent")}</th>
+            <th class="sortable r" on:click={() => (ifSort = toggleCardSort(ifSort, "bytes_recv"))}>Recv{cardArrow(ifSort, "bytes_recv")}</th>
           </tr>
-        {:else}
-          <tr><td colspan="4" class="muted">Nothing yet.</td></tr>
-        {/each}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {#each ifaceRows as r (r.interface ?? "—")}
+            <tr>
+              <td class="mono clicky" title="filter to this interface"
+                  on:click={() => (ifaceFilter = r.interface ?? "")}>{r.interface ?? "—"}</td>
+              <td class="r">{r.flows}</td>
+              <td class="nowrap r">{bytes(r.bytes_sent)}</td>
+              <td class="nowrap r">{bytes(r.bytes_recv)}</td>
+            </tr>
+          {:else}
+            <tr><td colspan="4" class="muted">Nothing yet.</td></tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section class="ui-card">
     <h2>Top remote hosts</h2>
-    <p class="muted hint">By total volume in the selected window.</p>
-    <table>
-      <thead><tr><th>Remote IP</th><th>Flows</th><th>Sent</th><th>Recv</th></tr></thead>
-      <tbody>
-        {#each summary?.top_remotes ?? [] as r (r.remote_ip)}
+    <p class="muted hint">Top 25 by volume, current filters applied.</p>
+    <div class="scroll">
+      <table>
+        <thead>
           <tr>
-            <td class="mono clicky" title="filter to this IP"
-                on:click={() => (ipFilter = r.remote_ip)}>{r.remote_ip}</td>
-            <td>{r.flows}</td>
-            <td class="nowrap">{bytes(r.bytes_sent)}</td>
-            <td class="nowrap">{bytes(r.bytes_recv)}</td>
+            <th class="sortable" on:click={() => (remSort = toggleCardSort(remSort, "remote_ip"))}>Remote IP{cardArrow(remSort, "remote_ip")}</th>
+            <th class="sortable r" on:click={() => (remSort = toggleCardSort(remSort, "flows"))}>Flows{cardArrow(remSort, "flows")}</th>
+            <th class="sortable r" on:click={() => (remSort = toggleCardSort(remSort, "bytes_sent"))}>Sent{cardArrow(remSort, "bytes_sent")}</th>
+            <th class="sortable r" on:click={() => (remSort = toggleCardSort(remSort, "bytes_recv"))}>Recv{cardArrow(remSort, "bytes_recv")}</th>
           </tr>
-        {:else}
-          <tr><td colspan="4" class="muted">Nothing yet.</td></tr>
-        {/each}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {#each remoteRows as r (r.remote_ip)}
+            <tr>
+              <td class="mono clicky nowrap" title="filter to this IP"
+                  on:click={() => (ipFilter = r.remote_ip)}>{r.remote_ip}</td>
+              <td class="r">{r.flows}</td>
+              <td class="nowrap r">{bytes(r.bytes_sent)}</td>
+              <td class="nowrap r">{bytes(r.bytes_recv)}</td>
+            </tr>
+          {:else}
+            <tr><td colspan="4" class="muted">Nothing yet.</td></tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section class="ui-card">
     <h2>Top ports</h2>
-    <p class="muted hint">Service port: ours for inbound flows, theirs for outbound.</p>
-    <table>
-      <thead><tr><th>Port</th><th>Proto</th><th>Flows</th><th>Sent</th><th>Recv</th></tr></thead>
-      <tbody>
-        {#each summary?.top_ports ?? [] as p (`${p.proto}:${p.port}`)}
+    <p class="muted hint">Top 25 by volume, current filters applied. Service port: ours for inbound flows, theirs for outbound.</p>
+    <div class="scroll">
+      <table>
+        <thead>
           <tr>
-            <td class="mono clicky" title="filter to this port"
-                on:click={() => (portFilter = String(p.port))}>{p.port}</td>
-            <td class="mono">{p.proto}</td>
-            <td>{p.flows}</td>
-            <td class="nowrap">{bytes(p.bytes_sent)}</td>
-            <td class="nowrap">{bytes(p.bytes_recv)}</td>
+            <th class="sortable r" on:click={() => (portSort = toggleCardSort(portSort, "port"))}>Port{cardArrow(portSort, "port")}</th>
+            <th class="sortable" on:click={() => (portSort = toggleCardSort(portSort, "proto"))}>Proto{cardArrow(portSort, "proto")}</th>
+            <th class="sortable r" on:click={() => (portSort = toggleCardSort(portSort, "flows"))}>Flows{cardArrow(portSort, "flows")}</th>
+            <th class="sortable r" on:click={() => (portSort = toggleCardSort(portSort, "bytes_sent"))}>Sent{cardArrow(portSort, "bytes_sent")}</th>
+            <th class="sortable r" on:click={() => (portSort = toggleCardSort(portSort, "bytes_recv"))}>Recv{cardArrow(portSort, "bytes_recv")}</th>
           </tr>
-        {:else}
-          <tr><td colspan="5" class="muted">Nothing yet.</td></tr>
-        {/each}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {#each portRows as p (`${p.proto}:${p.port}`)}
+            <tr>
+              <td class="mono clicky r" title="filter to this port"
+                  on:click={() => (portFilter = String(p.port))}>{p.port}</td>
+              <td class="mono">{p.proto}</td>
+              <td class="r">{p.flows}</td>
+              <td class="nowrap r">{bytes(p.bytes_sent)}</td>
+              <td class="nowrap r">{bytes(p.bytes_recv)}</td>
+            </tr>
+          {:else}
+            <tr><td colspan="5" class="muted">Nothing yet.</td></tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   </section>
 </div>
 
@@ -377,13 +480,24 @@
   .save-status.saving { color: var(--color-text-muted); }
   .save-status.saved { color: var(--status-green); }
   .save-status.error { color: var(--status-red); }
-  .hint { font-size: var(--fs-xs, 11px); margin: 2px 0 8px; }
+  .hint { font-size: var(--fs-xs, 11px); margin: 6px 0 0; }
   .toggle {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: var(--fs-sm, 13px); color: var(--color-text); white-space: nowrap;
   }
   .cards { margin-bottom: 14px; }
-  .cards.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); margin-top: 14px; }
+  /* Wide tables: one card per row on narrow screens, side-by-side only when
+     each gets a comfortable width; overflow scrolls inside the card. */
+  .cards.breakdown {
+    grid-template-columns: repeat(auto-fit, minmax(min(430px, 100%), 1fr));
+    margin-top: 14px;
+  }
+  .scroll { overflow-x: auto; }
+  .scroll table { width: 100%; }
+  .scroll th, .scroll td { white-space: nowrap; }
+  .r { text-align: right; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--color-text); }
   .stat .label {
     font-size: var(--fs-xs, 11px); text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--color-text-muted);
