@@ -19,6 +19,16 @@ export function dur(seconds: number | null | undefined): string {
   return `${sec}s`;
 }
 
+export function bytes(n: number | null | undefined): string {
+  if (n == null) return "—";
+  if (n < 1024) return `${n} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let v = n;
+  let i = -1;
+  do { v /= 1024; i++; } while (v >= 1024 && i < units.length - 1);
+  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+}
+
 export function stateClass(state: string): string {
   if (state === "CONNECTED") return "green";
   if (state === "DEGRADED" || state === "NO_MODEM") return "red";

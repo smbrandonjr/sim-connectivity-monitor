@@ -22,9 +22,11 @@ fi
 if [[ "${SKIP_APT:-0}" == "1" ]]; then
     say "Skipping OS package step (SKIP_APT=1)"
 else
-    say "Installing OS packages (python3-venv, NetworkManager, ModemManager)"
+    say "Installing OS packages (python3-venv, NetworkManager, ModemManager, conntrack)"
     apt-get update -qq
-    apt-get install -y -qq python3 python3-venv network-manager modemmanager > /dev/null
+    # conntrack + nftables power the traffic auditor (per-flow byte accounting).
+    apt-get install -y -qq python3 python3-venv network-manager modemmanager \
+        conntrack nftables > /dev/null
 fi
 
 say "Creating directories"

@@ -66,6 +66,19 @@ http_checks:
   rollup_retention_days: 30
   interface_colors: {}
 
+# Traffic audit: record every conntrack flow (inbound, outbound, forwarded —
+# any interface) with endpoints, protocol, and byte/packet counts, so "did this
+# device talk to IP X on port Y, and how much" is always answerable from the
+# Traffic tab / API. Flow accounting, not packet capture: payloads are never
+# stored, and overhead is negligible. Needs the conntrack + nftables packages
+# (install.sh installs them); the daemon enables kernel flow accounting itself.
+traffic:
+  enabled: true
+  snapshot_interval_seconds: 30   # how often live (unclosed) flows are checkpointed
+  retention_days: 30
+  max_flows: 200000               # hard row cap (oldest closed flows pruned first)
+  include_local: false            # also record loopback / host-internal chatter
+
 log_level: INFO
 
 # SQLite database for events + monitor history.

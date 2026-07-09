@@ -277,6 +277,26 @@ class HttpCheckConfig(StrictModel):
         return colors
 
 
+class TrafficConfig(StrictModel):
+    """Device-wide traffic audit: record every conntrack flow (inbound,
+    outbound, and forwarded, on any interface) with remote/local endpoint,
+    protocol, and per-direction byte/packet totals, so 'did this device talk
+    to IP X on port Y, and how much' is always answerable. Flow-level
+    accounting via the kernel connection tracker — no packet capture, so the
+    cost is negligible. Global (device-level), not per-profile."""
+
+    enabled: bool = True
+    # How often to snapshot the live conntrack table so long-running flows
+    # appear (and keep their counters fresh) before they close.
+    snapshot_interval_seconds: int = Field(default=30, ge=5, le=600)
+    retention_days: int = Field(default=30, ge=1, le=365)
+    # Hard cap on stored flows (oldest closed flows pruned first) so a traffic
+    # storm can't balloon the DB.
+    max_flows: int = Field(default=200_000, ge=1000, le=5_000_000)
+    # Record host-internal chatter too (loopback / local<->local flows).
+    include_local: bool = False
+
+
 SmsMatchType = Literal["contains", "exact", "prefix", "regex"]
 
 
@@ -531,6 +551,7 @@ class AppConfig(StrictModel):
     modem: ModemConfig = Field(default_factory=ModemConfig)
     latency: LatencyConfig = Field(default_factory=LatencyConfig)
     http_checks: HttpCheckConfig = Field(default_factory=HttpCheckConfig)
+    traffic: TrafficConfig = Field(default_factory=TrafficConfig)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     db_path: Path = Path("sim-monitor.db")
     profiles_dir: Path = Path("config/profiles.d")

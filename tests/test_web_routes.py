@@ -608,3 +608,46 @@ class TestJsonProfileApi:
              "pdp_contexts": [{"cid": 1, "apn": "hologram", "bearer": True}]},
         ]).get_json()
         assert result["imported"] == 1
+
+
+class TestTrafficApi:
+    def _flow(self, **kw):
+        base = {
+            "first_seen": 1000.0, "last_seen": 1010.0, "proto": "tcp",
+            "direction": "out", "remote_ip": "1.2.3.4", "remote_port": 443,
+            "local_ip": "10.0.0.5", "local_port": 40000,
+            "bytes_sent": 100, "bytes_recv": 200,
+            "packets_sent": 2, "packets_recv": 3, "active": 0,
+        }
+        base.update(kw)
+        return base
+
+    def test_flows_filtering(self, sim, client):
+        sim.db.add_traffic_flow(self._flow())
+        sim.db.add_traffic_flow(self._flow(remote_ip="5.6.7.8", proto="udp",
+                                           remote_port=53))
+        data = client.get("/api/traffic/flows.json").get_json()
+        assert data["total"] == 2
+        data = client.get("/api/traffic/flows.json?ip=1.2.3.4").get_json()
+        assert data["total"] == 1
+        assert data["flows"][0]["remote_port"] == 443
+        data = client.get("/api/traffic/flows.json?port=53&proto=udp").get_json()
+        assert data["total"] == 1
+
+    def test_summary(self, sim, client):
+        sim.db.add_traffic_flow(self._flow(bytes_sent=1000))
+        data = client.get("/api/traffic/summary.json").get_json()
+        assert data["totals"]["out"]["bytes_sent"] == 1000
+        assert data["top_remotes"][0]["remote_ip"] == "1.2.3.4"
+        assert "status" in data
+
+    def test_config_roundtrip(self, sim, client):
+        cfg = client.get("/api/traffic-config.json").get_json()
+        assert cfg["enabled"] is True  # default: audit on
+        cfg["retention_days"] = 9
+        assert client.put("/api/traffic-config", json=cfg).status_code == 200
+        assert client.get("/api/traffic-config.json").get_json()["retention_days"] == 9
+
+    def test_config_rejects_invalid(self, sim, client):
+        resp = client.put("/api/traffic-config", json={"retention_days": 0})
+        assert resp.status_code == 400

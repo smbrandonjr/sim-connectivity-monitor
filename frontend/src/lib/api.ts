@@ -173,6 +173,47 @@ export const api = {
     }),
   markTcpRead: () => fetch("/api/tcp/mark-read", { method: "POST" }),
 
+  trafficFlows: (params: {
+    from?: number; to?: number; ip?: string; port?: number | null;
+    proto?: string; direction?: string; active?: boolean;
+    limit?: number; offset?: number;
+  } = {}) => {
+    const q = new URLSearchParams();
+    if (params.from != null) q.set("from", String(Math.floor(params.from)));
+    if (params.to != null) q.set("to", String(Math.floor(params.to)));
+    if (params.ip) q.set("ip", params.ip);
+    if (params.port != null) q.set("port", String(params.port));
+    if (params.proto) q.set("proto", params.proto);
+    if (params.direction) q.set("direction", params.direction);
+    if (params.active != null) q.set("active", params.active ? "1" : "0");
+    q.set("limit", String(params.limit ?? 50));
+    q.set("offset", String(params.offset ?? 0));
+    return getJSON<{ flows: any[]; total: number; server_time: number }>(
+      `/api/traffic/flows.json?${q.toString()}`,
+    );
+  },
+  trafficSummary: (from?: number, to?: number) => {
+    const q = new URLSearchParams();
+    if (from != null) q.set("from", String(Math.floor(from)));
+    if (to != null) q.set("to", String(Math.floor(to)));
+    return getJSON<any>(`/api/traffic/summary.json?${q.toString()}`);
+  },
+  trafficConfig: () => getJSON<any>("/api/traffic-config.json"),
+
+  async saveTrafficConfig(cfg: Record<string, unknown>): Promise<boolean> {
+    const res = await fetch("/api/traffic-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(data.error || "save failed", "error");
+      return false;
+    }
+    return true;
+  },
+
   placeholders: () => getJSON<Record<string, any>>("/api/placeholders.json"),
   scanStatus: () => getJSON<any>("/api/scan.json"),
   scanInterfaces: () => getJSON<any[]>("/api/scan/interfaces.json"),

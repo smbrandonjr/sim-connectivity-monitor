@@ -14,6 +14,7 @@
   import Monitoring from "./views/Monitoring.svelte";
   import Scan from "./views/Scan.svelte";
   import Latency from "./views/Latency.svelte";
+  import Traffic from "./views/Traffic.svelte";
 
   const TABS = [
     { id: "dashboard", label: "Dashboard", icon: "dashboard-line", view: Dashboard },
@@ -21,6 +22,7 @@
     { id: "messaging", label: "Messaging", icon: "message-2-line", view: Messaging },
     { id: "monitoring", label: "Monitoring", icon: "heart-pulse-line", view: Monitoring },
     { id: "latency", label: "Latency", icon: "pulse-line", view: Latency },
+    { id: "traffic", label: "Traffic", icon: "arrow-left-right-line", view: Traffic },
     { id: "scan", label: "Scan", icon: "radar-line", view: Scan },
     { id: "timeline", label: "Timeline", icon: "time-line", view: Timeline },
     { id: "diagnostics", label: "Diagnostics", icon: "terminal-box-line", view: Diagnostics },

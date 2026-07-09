@@ -572,6 +572,70 @@ def http_checks_config_put():
     return jsonify({"ok": True})
 
 
+@bp.get("/traffic/flows.json")
+def traffic_flows():
+    """Audited network flows, newest first. Query params: `from`/`to` (epoch
+    seconds, matched by overlap so long-lived flows count), `ip` (exact or
+    with a * wildcard; matches either endpoint), `port` (either endpoint),
+    `proto`, `direction` (out/in/fwd/local), `active` (1/0), limit/offset."""
+    args = request.args
+    active_arg = args.get("active")
+    flows, total = sim().db.query_traffic_flows(
+        t0=args.get("from", type=float),
+        t1=args.get("to", type=float),
+        ip=(args.get("ip") or "").strip() or None,
+        port=args.get("port", type=int),
+        proto=args.get("proto") or None,
+        direction=args.get("direction") or None,
+        active=None if active_arg in (None, "") else active_arg in ("1", "true"),
+        limit=min(args.get("limit", default=100, type=int), 500),
+        offset=max(args.get("offset", default=0, type=int), 0),
+    )
+    return jsonify({"flows": flows, "total": total, "server_time": time.time()})
+
+
+@bp.get("/traffic/summary.json")
+def traffic_summary():
+    """Aggregates for the traffic audit view (totals by direction, top remote
+    hosts/ports by volume) plus the collector's runtime status."""
+    db = sim().db
+    summary = db.traffic_summary(
+        t0=request.args.get("from", type=float),
+        t1=request.args.get("to", type=float),
+    )
+    summary["status"] = db.get_setting("traffic_status")
+    summary["server_time"] = time.time()
+    return jsonify(summary)
+
+
+@bp.get("/traffic-config.json")
+def traffic_config_get():
+    """The effective traffic-audit config: the UI-managed setting if saved,
+    else the config.yaml default. Edits hot-reload on the next tick."""
+    app = sim()
+    raw = app.db.get_setting("traffic")
+    return jsonify(raw or app.config.traffic.model_dump(mode="json"))
+
+
+@bp.put("/traffic-config")
+def traffic_config_put():
+    from sim_monitor.config.schema import TrafficConfig
+
+    body = _body()
+    try:
+        config = TrafficConfig.model_validate(body)
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    app = sim()
+    app.db.set_setting("traffic", config.model_dump(mode="json"))
+    app.events.info(
+        "traffic",
+        f"traffic audit config updated (enabled={config.enabled}, "
+        f"retention={config.retention_days}d)",
+    )
+    return jsonify({"ok": True})
+
+
 @bp.get("/sms-autoreply.json")
 def sms_autoreply_get():
     """The UI-managed SMS auto-reply rules (device DB; never committed). Returns

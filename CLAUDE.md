@@ -32,6 +32,12 @@ default route, and heartbeats a configurable HTTP endpoint to prove connectivity
 - **Hardware backend**: `system/real_backend.py` over `system/{mmcli,nmcli,routing}.py`
   subprocess wrappers (all parsing fixture-tested) + `system/usb_power.py` (sysfs
   `authorized` toggle). All subprocess calls timeout-bounded (`system/proc.py`).
+- **Traffic audit** (`traffic/`): a collector thread records every conntrack flow
+  (in/out/forwarded, any interface) into `traffic_flows` — endpoints, proto, byte/packet
+  counts — via `conntrack -E` DESTROY events + periodic `-L` live checkpoints. Pure line
+  parsing/classification in `traffic/parse.py`; setup (acct sysctls + a no-op nft table
+  that keeps conntrack registered) is self-ensured at start. Queried by the Traffic tab
+  (`/api/traffic/*`).
 - **PDP reconciliation**: the modem must end up with *exactly* the profile's `pdp_contexts`
   (1–3) — extras auto-created by modem firmware get deleted, mismatches fixed, missing ones
   defined. Pure diff logic in `modem/pdp_reconcile.py`.

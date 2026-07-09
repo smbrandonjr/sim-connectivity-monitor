@@ -92,6 +92,7 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
     )
     from sim_monitor.monitor.tcp_listener import TcpListener, effective_tcp_config
     from sim_monitor.monitor.udp_listener import UdpListener, effective_udp_config
+    from sim_monitor.traffic.collector import TrafficCollector, effective_traffic_config
     from sim_monitor.web import server
 
     app = build(config, profiles)
@@ -178,6 +179,35 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
     )
     tcp_thread.start()
 
+    # Traffic auditor: records every conntrack flow (any interface, any
+    # direction) so "did this device talk to IP X on port Y, how much" is
+    # always answerable from the DB.
+    if config.simulate:
+        from sim_monitor.traffic.sources import FakeFlowSource
+
+        traffic_source = FakeFlowSource()
+        traffic_local_ips = traffic_source.local_ips
+        traffic_backend = "simulate"
+    else:
+        from sim_monitor.system.netifaces import list_local_ips
+        from sim_monitor.traffic.sources import ConntrackSource
+
+        traffic_source = ConntrackSource()
+        traffic_local_ips = list_local_ips
+        traffic_backend = "conntrack"
+    traffic = TrafficCollector(
+        db=app.db,
+        events=app.events,
+        get_config=lambda: effective_traffic_config(app.db, app.config.traffic),
+        source=traffic_source,
+        local_ips=traffic_local_ips,
+        backend_name=traffic_backend,
+    )
+    traffic_thread = threading.Thread(
+        target=traffic.run, args=(app.stop,), name="traffic", daemon=True
+    )
+    traffic_thread.start()
+
     flask_app = server.create_app(app)
     try:
         server.serve(flask_app, config.web.host, config.web.port)
@@ -191,5 +221,6 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
         http_check_thread.join(timeout=5)
         udp_thread.join(timeout=5)
         tcp_thread.join(timeout=5)
+        traffic_thread.join(timeout=5)
         app.db.close()
     return 0
