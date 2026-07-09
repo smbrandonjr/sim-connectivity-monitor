@@ -430,8 +430,27 @@ class Daemon:
             elif ev.kind == "caller_id":
                 number = ev.fields.get("number") or "withheld/unknown"
                 self.events.info("urc", f"incoming call from {number}")
+            elif ev.kind == "sms_pdu":
+                self._flag_ota_pdu(ev.raw)
             elif ev.kind not in ("unknown",):
                 self.events.info("urc", f"{ev.kind}: {ev.raw}")
+
+    def _flag_ota_pdu(self, raw: str) -> None:
+        """A bare PDU line followed a +CMT/+CDS URC (message routed straight to
+        the TE, not stored). If it decodes as SIM/eUICC OTA traffic, put a
+        loud breadcrumb in the timeline — these never reach the inbox."""
+        from sim_monitor.modem.ota_sms import classify_ota
+        from sim_monitor.modem.pdu import decode_pdu
+
+        try:
+            d = decode_pdu(raw.strip())
+        except (ValueError, IndexError):
+            return  # status reports / non-DELIVER TPDUs land here; fine
+        reason = classify_ota(d.pid, d.dcs, d.udh_ieis)
+        if reason:
+            self.events.info(
+                "ota", f"eUICC/OTA SMS delivered from {d.sender}: {reason}"
+            )
 
     # ------------------------------------------------------------------ SMS
 
@@ -467,6 +486,13 @@ class Daemon:
         self.store.update(sms_unread=self.db.count_unread_sms())
         if new_rows:
             self.events.info("sms", f"{len(new_rows)} new message(s) received")
+            # SIM/eUICC OTA messages get their own timeline breadcrumb (kind
+            # "ota") so carrier profile operations are easy to audit.
+            for row in new_rows:
+                if row.get("ota"):
+                    self.events.info(
+                        "ota", f"eUICC/OTA SMS from {row['peer']}: {row['ota']}"
+                    )
             self._auto_reply(new_rows)
 
     def _send_sms(self, number: str, text: str) -> None:

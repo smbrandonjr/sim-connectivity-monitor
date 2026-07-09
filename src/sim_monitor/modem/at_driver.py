@@ -57,7 +57,10 @@ class ATModemDriver(ModemDriver):
         "AT+CGREG=2",
         "AT+CEREG=2",
         "AT+CTZR=1",          # network time-zone (NITZ) URCs
-        'AT+CNMI=2,1,0,0,0',  # new SMS -> +CMTI indication (store, don't dump)
+        # New SMS -> +CMTI indication (store, don't dump); <ds>=1 also routes
+        # SMS-STATUS-REPORTs (+CDS) so delivery proofs — including for OTA
+        # traffic — show up in the URC console.
+        "AT+CNMI=2,1,0,1,0",
         "AT+CLIP=1",          # incoming call -> +CLIP with caller number
         "AT+CRC=1",           # ring as +CRING: <type> (VOICE vs data)
     )

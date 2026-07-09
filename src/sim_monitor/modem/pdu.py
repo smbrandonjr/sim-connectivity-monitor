@@ -50,6 +50,10 @@ class DecodedSms:
     text: str               # decoded text; for 8-bit binary, hex string
     encoding: str           # "gsm7" | "ucs2" | "8bit"
     concat: Concat | None    # set when part of a multi-part message
+    # Protocol fields kept for OTA/eUICC classification (see modem/ota_sms.py):
+    pid: int = 0            # TP-PID (0x7F = (U)SIM data download)
+    dcs: int = 0            # TP-DCS raw octet (message class lives here)
+    udh_ieis: tuple[int, ...] = ()  # UDH information-element ids (0x70 = SCP80 cmd)
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -161,21 +165,24 @@ def _text_to_gsm7_septets(text: str) -> list[int] | None:
     return septets
 
 
-def _parse_udh_concat(ud: bytes) -> tuple[int, Concat | None]:
-    """Parse a UDH at the start of UD. Returns (udh_total_len_octets, Concat)."""
+def _parse_udh_concat(ud: bytes) -> tuple[int, Concat | None, tuple[int, ...]]:
+    """Parse a UDH at the start of UD. Returns (udh_total_len_octets, Concat,
+    all information-element ids seen — 0x70/0x71 mark 23.048 secured packets)."""
     udhl = ud[0]
     concat = None
+    ieis: list[int] = []
     i = 1
     end = 1 + udhl
     while i + 1 < end:
         iei, ielen = ud[i], ud[i + 1]
         val = ud[i + 2:i + 2 + ielen]
+        ieis.append(iei)
         if iei == 0x00 and ielen == 3:
             concat = Concat(ref=val[0], total=val[1], seq=val[2])
         elif iei == 0x08 and ielen == 4:
             concat = Concat(ref=(val[0] << 8) | val[1], total=val[2], seq=val[3])
         i += 2 + ielen
-    return 1 + udhl, concat
+    return 1 + udhl, concat, tuple(ieis)
 
 
 # ── decode ──────────────────────────────────────────────────────────────────
@@ -192,16 +199,17 @@ def decode_pdu(pdu_hex: str) -> DecodedSms:
     oa_octets = 1 + (oa_len + 1) // 2  # TOA + BCD digits
     sender = _decode_address(b[idx + 2:idx + 2 + oa_octets], oa_len)
     idx = idx + 2 + oa_octets
-    idx += 1  # TP-PID
-    dcs = b[idx]
-    scts, scts_epoch = _decode_scts(b[idx + 1:idx + 8])
-    udl = b[idx + 8]
-    ud = b[idx + 9:]
+    pid = b[idx]
+    dcs = b[idx + 1]
+    scts, scts_epoch = _decode_scts(b[idx + 2:idx + 9])
+    udl = b[idx + 9]
+    ud = b[idx + 10:]
 
     udh_len = 0
     concat = None
+    udh_ieis: tuple[int, ...] = ()
     if udhi:
-        udh_len, concat = _parse_udh_concat(ud)
+        udh_len, concat, udh_ieis = _parse_udh_concat(ud)
 
     # Data coding: bits 2-3 select alphabet (0=GSM7, 1=8bit, 2=UCS2).
     alphabet = (dcs >> 2) & 0x03
@@ -216,7 +224,10 @@ def decode_pdu(pdu_hex: str) -> DecodedSms:
         septet_count = udl - (udh_len * 8 + fill_bits) // 7
         text = _unpack_gsm7(ud, septet_count, skip_bits=udh_len * 8 + fill_bits)
         encoding = "gsm7"
-    return DecodedSms(sender, scts, scts_epoch, text, encoding, concat)
+    return DecodedSms(
+        sender, scts, scts_epoch, text, encoding, concat,
+        pid=pid, dcs=dcs, udh_ieis=udh_ieis,
+    )
 
 
 # ── encode ──────────────────────────────────────────────────────────────────

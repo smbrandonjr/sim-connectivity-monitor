@@ -219,6 +219,12 @@ def classify_urc(line: str) -> tuple[str, dict]:
         return "caller_id", {"number": m.group(1) or None, "type": int(m.group(2))}
     if upper.startswith("NO CARRIER"):
         return "no_carrier", {}
+    # A bare hex blob in the URC stream is the PDU line that follows a
+    # +CMT/+CDS header (PDU mode routes the message body on its own line).
+    # Surfaced as its own kind so the daemon can decode it — this is where
+    # directly-routed SIM/eUICC OTA messages become visible.
+    if re.fullmatch(r"[0-9A-Fa-f]{16,}", line):
+        return "sms_pdu", {}
     return "unknown", {"raw": line}
 
 

@@ -220,6 +220,7 @@
         <td class="nowrap mono">{m.peer ?? "—"}</td>
         <td class="break">
           {m.body}
+          {#if m.ota}<span class="badge blue" title={m.ota}>eUICC/OTA</span>{/if}
           {#if m.encoding === "8bit"}<span class="badge amber">binary</span>{/if}
           {#if m.parts > 1}<span class="badge">{m.parts} parts</span>{/if}
         </td>
@@ -230,7 +231,16 @@
     {/each}
   </tbody>
 </table>
-<p class="muted">Binary/OTA (class-2) messages are shown as hex; multi-part messages are reassembled.</p>
+<p class="muted">
+  Binary/OTA (class-2) messages are shown as hex; multi-part messages are
+  reassembled. Messages tagged <span class="badge blue">eUICC/OTA</span> are
+  SIM-directed carrier traffic (data-download PID, class 2, or a secured
+  packet header) — hover the badge for the exact reason; each also logs an
+  "ota" event in the Timeline. Note: OTA messages the modem hands straight to
+  the SIM (and the SIM's own replies) never reach modem storage — those
+  surface only as "ota" Timeline events and URC-console lines when the modem
+  reports them.
+</p>
 
 <style>
   .hint { font-size: var(--fs-xs, 11px); margin: 2px 0 0; }

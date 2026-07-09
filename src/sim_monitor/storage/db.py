@@ -64,7 +64,10 @@ CREATE TABLE IF NOT EXISTS sms (
     modem_indices TEXT,              -- JSON list of modem storage indices (inbound)
     parts INTEGER DEFAULT 1,
     raw_pdu TEXT,
-    dedup TEXT                       -- stable content key (inbound): peer|ts|body
+    dedup TEXT,                      -- stable content key (inbound): peer|ts|body
+    pid INTEGER,                     -- TP-PID (0x7F = SIM data download)
+    dcs INTEGER,                     -- TP-DCS raw octet
+    ota TEXT                         -- non-NULL = SIM/eUICC OTA message (reason)
 );
 CREATE INDEX IF NOT EXISTS idx_sms_ts ON sms(ts);
 CREATE TABLE IF NOT EXISTS udp_messages (
@@ -215,6 +218,10 @@ class Database:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(sms)")}
         if "dedup" not in cols:
             self._conn.execute("ALTER TABLE sms ADD COLUMN dedup TEXT")
+        if "ota" not in cols:
+            self._conn.execute("ALTER TABLE sms ADD COLUMN pid INTEGER")
+            self._conn.execute("ALTER TABLE sms ADD COLUMN dcs INTEGER")
+            self._conn.execute("ALTER TABLE sms ADD COLUMN ota TEXT")
         mcols = {r["name"] for r in self._conn.execute("PRAGMA table_info(monitor_results)")}
         if "interface" not in mcols:
             self._conn.execute("ALTER TABLE monitor_results ADD COLUMN interface TEXT")
@@ -362,12 +369,13 @@ class Database:
                     new_rows.append(r)
                     self._conn.execute(
                         "INSERT INTO sms (ts, direction, peer, body, encoding, status,"
-                        " modem_indices, parts, raw_pdu, dedup)"
-                        " VALUES (?, 'in', ?, ?, ?, 'unread', ?, ?, ?, ?)",
+                        " modem_indices, parts, raw_pdu, dedup, pid, dcs, ota)"
+                        " VALUES (?, 'in', ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?, ?)",
                         (
                             r["ts"], r["peer"], r["body"], r["encoding"],
                             json.dumps(r["modem_indices"]), r.get("parts", 1),
                             r.get("raw_pdu"), r["dedup"],
+                            r.get("pid"), r.get("dcs"), r.get("ota"),
                         ),
                     )
             self._conn.commit()

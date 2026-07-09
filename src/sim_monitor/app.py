@@ -96,6 +96,12 @@ def run(config: AppConfig, profiles: list[Profile]) -> int:
     from sim_monitor.web import server
 
     app = build(config, profiles)
+    if config.simulate:
+        # Seed one carrier OTA/eUICC SMS (PID 0x7F, class 2, SCP80 UDH) so the
+        # audit path — inbox badge + "ota" timeline event — is visible on dev.
+        driver = getattr(app.daemon.detector, "driver", None)
+        if hasattr(driver, "receive_ota_sms"):
+            driver.receive_ota_sms()
     daemon_thread = threading.Thread(
         target=app.daemon.run, args=(app.stop,), name="daemon", daemon=True
     )

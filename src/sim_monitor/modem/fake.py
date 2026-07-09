@@ -216,6 +216,30 @@ class FakeModemDriver(ModemDriver):
         self.push_urc("new_sms", {"storage": "ME", "index": index}, raw=f'+CMTI: "ME",{index}')
         return index
 
+    # Fake SCP80 secured command packet behind a UDH 0x70 information element,
+    # as a carrier OTA platform would send (contents are arbitrary bytes).
+    _OTA_UD_HEX = "027000" + "00281506192525B00010A1B2C3D4"
+
+    def receive_ota_sms(self) -> int:
+        """Simulate a carrier SIM/eUICC OTA message: SMS-DELIVER with
+        PID 0x7F ((U)SIM data download), DCS 0xF6 (8-bit, class 2), and a
+        23.048 command-packet UDH — the shape of real SM-SR/RAM traffic."""
+        ud = bytes.fromhex(self._OTA_UD_HEX)
+        deliver = (
+            "00"    # no SMSC
+            "44"    # SMS-DELIVER, UDHI set
+            "03" "81" "77F0"  # OA: short code 770
+            "7F"    # TP-PID: (U)SIM data download
+            "F6"    # TP-DCS: 8-bit data, message class 2
+            "00000000000000"  # zeroed SCTS (decoder falls back to now)
+            + f"{len(ud):02X}" + ud.hex().upper()
+        )
+        index = self._next_sms_index
+        self._next_sms_index += 1
+        self._sms[index] = (0, deliver)  # 0 = unread
+        self.push_urc("new_sms", {"storage": "ME", "index": index}, raw=f'+CMTI: "ME",{index}')
+        return index
+
     # ── test/sim scripting helpers ──────────────────────────────────────────
     def push_urc(self, kind: str, fields: dict | None = None, raw: str = "") -> None:
         """Queue a URC the daemon will see on its next poll_events()."""
